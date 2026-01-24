@@ -1,0 +1,72 @@
+[package]
+name = "minutes"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight Linux CLI tool for meeting recording, transcription, and AI-powered insights"
+authors = ["Tejas Raskar"]
+license = "MIT"
+repository = "https://github.com/tejas-raskar/minutes"
+keywords = ["meeting", "transcription", "audio", "whisper", "cli"]
+categories = ["command-line-utilities", "multimedia::audio"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full", "signal"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# TUI
+ratatui = "0.27"
+crossterm = "0.27"
+
+# Audio
+# Note: pipewire-rs requires libpipewire-dev on your system
+# pipewire = "0.8"
+# Using cpal for broader compatibility initially
+cpal = "0.15"
+hound = "3.5"
+
+# Transcription
+# Note: whisper-rs requires whisper.cpp to be built
+whisper-rs = "0.14"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# HTTP client (for Gemini API - post-MVP)
+reqwest = { version = "0.12", features = ["json", "stream"], optional = true }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+directories = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "1"
+
+# IPC
+interprocess = { version = "2", features = ["tokio"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"
+
+[features]
+default = []
+llm = ["reqwest"]
+
+[[bin]]
+name = "minutes"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

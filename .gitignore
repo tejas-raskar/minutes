@@ -1,0 +1,30 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Data files (not for version control)
+*.db
+*.db-shm
+*.db-wal
+*.wav
+*.ogg
+*.bin
+
+# Logs
+*.log

@@ -1,0 +1,21 @@
+[Unit]
+Description=minutes - Meeting recording and transcription daemon
+Documentation=https://github.com/yourusername/minutes
+After=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/minutes daemon start --foreground
+ExecStop=%h/.cargo/bin/minutes daemon stop
+Restart=on-failure
+RestartSec=5
+
+# Environment
+Environment=RUST_LOG=info
+
+# Resource limits
+MemoryMax=4G
+CPUQuota=200%
+
+[Install]
+WantedBy=default.target
