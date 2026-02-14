@@ -5,6 +5,8 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::audio::AudioBackend;
+
 /// Main application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -42,6 +44,10 @@ pub struct GeneralSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
+    /// Audio backend to use (auto, pipewire, cpal)
+    #[serde(default)]
+    pub backend: AudioBackend,
+
     /// Sample rate for recording (default: 16000 for Whisper compatibility)
     #[serde(default = "default_sample_rate")]
     pub sample_rate: u32,
@@ -61,6 +67,18 @@ pub struct AudioSettings {
     /// Preferred audio device (empty = default)
     #[serde(default)]
     pub device: String,
+
+    /// Whether to compress recordings to OGG Opus
+    #[serde(default = "default_true")]
+    pub compress_to_ogg: bool,
+
+    /// OGG Opus bitrate in bits per second (default: 24000 for speech)
+    #[serde(default = "default_ogg_bitrate")]
+    pub ogg_bitrate: u32,
+
+    /// Microphone boost factor (1.0 = no boost, 1.2 = 20% boost)
+    #[serde(default = "default_mic_boost")]
+    pub mic_boost: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +168,14 @@ fn default_true() -> bool {
     true
 }
 
+fn default_ogg_bitrate() -> u32 {
+    24000
+}
+
+fn default_mic_boost() -> f32 {
+    1.2
+}
+
 fn default_model() -> String {
     "base".to_string()
 }
@@ -159,7 +185,7 @@ fn default_llm_provider() -> String {
 }
 
 fn default_llm_model() -> String {
-    "gemini-pro".to_string()
+    "gemini-1.5-flash".to_string()
 }
 
 fn default_recent_count() -> usize {
@@ -182,11 +208,15 @@ impl Default for GeneralSettings {
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
+            backend: AudioBackend::default(),
             sample_rate: default_sample_rate(),
             channels: default_channels(),
             capture_system: true,
             capture_microphone: true,
             device: String::new(),
+            compress_to_ogg: true,
+            ogg_bitrate: default_ogg_bitrate(),
+            mic_boost: default_mic_boost(),
         }
     }
 }
@@ -243,16 +273,31 @@ impl Settings {
 
         if !config_path.exists() {
             tracing::info!("No config file found, using defaults");
-            return Ok(Self::default());
+            let mut settings = Self::default();
+            settings.apply_env_overrides();
+            return Ok(settings);
         }
 
         let content = std::fs::read_to_string(&config_path)
             .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 
-        let settings: Settings = toml::from_str(&content)
+        let mut settings: Settings = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", config_path.display()))?;
 
+        settings.apply_env_overrides();
+
         Ok(settings)
+    }
+
+    /// Apply environment variable overrides.
+    fn apply_env_overrides(&mut self) {
+        if self.llm.api_key.trim().is_empty() {
+            if let Ok(key) = std::env::var("MINUTES_GEMINI_API_KEY") {
+                if !key.trim().is_empty() {
+                    self.llm.api_key = key;
+                }
+            }
+        }
     }
 
     /// Get the path to the configuration file

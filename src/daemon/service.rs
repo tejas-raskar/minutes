@@ -1,11 +1,12 @@
 //! Main daemon service implementation
 
 use anyhow::Result;
+use std::path::PathBuf;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use crate::audio::AudioCapture;
+use crate::audio::{create_capture, AudioCapture, OggEncoder};
 use crate::config::Settings;
 use crate::daemon::ipc::{DaemonRequest, DaemonResponse};
 use crate::daemon::server::{CommandReceiver, IpcServer};
@@ -70,7 +71,7 @@ async fn command_handler(
     state: SharedState,
     mut cmd_rx: CommandReceiver,
 ) -> Result<()> {
-    let mut audio_capture: Option<AudioCapture> = None;
+    let mut audio_capture: Option<Box<dyn AudioCapture>> = None;
 
     while let Some((request, resp_tx)) = cmd_rx.recv().await {
         let response = match request {
@@ -104,7 +105,7 @@ async fn command_handler(
 async fn handle_start_recording(
     settings: &Settings,
     state: &SharedState,
-    audio_capture: &mut Option<AudioCapture>,
+    audio_capture: &mut Option<Box<dyn AudioCapture>>,
     title: String,
 ) -> DaemonResponse {
     let mut state_guard = state.write().await;
@@ -121,14 +122,15 @@ async fn handle_start_recording(
     let audio_filename = format!("{}.wav", recording.id);
     let audio_path = settings.audio_dir().join(&audio_filename);
 
-    // Initialize audio capture
-    match AudioCapture::new(settings, &audio_path) {
+    // Initialize audio capture using factory (auto-detects backend)
+    match create_capture(settings) {
         Ok(mut capture) => {
-            if let Err(e) = capture.start() {
+            if let Err(e) = capture.start(&audio_path) {
                 return DaemonResponse::Error {
                     message: format!("Failed to start audio capture: {}", e),
                 };
             }
+            info!("Audio capture started with {} backend", capture.backend_name());
             *audio_capture = Some(capture);
         }
         Err(e) => {
@@ -175,7 +177,7 @@ async fn handle_start_recording(
 async fn handle_stop_recording(
     settings: &Settings,
     state: &SharedState,
-    audio_capture: &mut Option<AudioCapture>,
+    audio_capture: &mut Option<Box<dyn AudioCapture>>,
 ) -> DaemonResponse {
     let mut state_guard = state.write().await;
 
@@ -190,6 +192,7 @@ async fn handle_stop_recording(
 
     let id = active.recording.id.clone();
     let duration_secs = active.started_at.elapsed().as_secs();
+    let wav_path = active.audio_path.clone();
 
     // Stop audio capture
     if let Some(ref mut capture) = audio_capture {
@@ -211,6 +214,7 @@ async fn handle_stop_recording(
 
     if let Ok(Some(mut recording)) = db.get_recording(&id) {
         recording.duration_secs = Some(duration_secs);
+        recording.audio_path = Some(wav_path.to_string_lossy().to_string());
         recording.state = RecordingState::Pending;
         if let Err(e) = db.update_recording(&recording) {
             warn!("Failed to update recording: {}", e);
@@ -222,6 +226,46 @@ async fn handle_stop_recording(
 
     info!("Recording stopped: {} ({}s)", id, duration_secs);
     DaemonResponse::RecordingStopped { id, duration_secs }
+}
+
+/// Compress WAV file to OGG Opus
+fn compress_to_ogg(settings: &Settings, wav_path: &PathBuf) -> Result<PathBuf> {
+    let encoder = OggEncoder::new(
+        settings.audio.sample_rate,
+        settings.audio.channels as u8,
+        settings.audio.ogg_bitrate,
+    );
+    encoder.encode_and_cleanup(wav_path)
+}
+
+fn should_compress_after_transcription(enabled: bool, audio_path: &std::path::Path) -> bool {
+    enabled
+        && audio_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("wav"))
+            .unwrap_or(false)
+}
+
+fn maybe_compress_transcribed_audio(
+    settings: &Settings,
+    db: &Database,
+    recording_id: &str,
+    audio_path: &std::path::Path,
+) -> Result<()> {
+    if !should_compress_after_transcription(settings.audio.compress_to_ogg, audio_path) {
+        return Ok(());
+    }
+
+    let wav_path = audio_path.to_path_buf();
+    let ogg_path = compress_to_ogg(settings, &wav_path)?;
+
+    if let Some(mut recording) = db.get_recording(recording_id)? {
+        recording.audio_path = Some(ogg_path.to_string_lossy().to_string());
+        db.update_recording(&recording)?;
+    }
+
+    Ok(())
 }
 
 /// Handle transcription request
@@ -338,7 +382,8 @@ async fn run_transcription(
     let audio_path = recording
         .audio_path
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("No audio path"))?;
+        .ok_or_else(|| anyhow::anyhow!("No audio path"))?
+        .to_string();
 
     // Run transcription
     let pipeline = TranscriptionPipeline::new(settings)?;
@@ -348,7 +393,7 @@ async fn run_transcription(
 
     let segments = pipeline
         .transcribe(
-            audio_path,
+            &audio_path,
             &recording.id,
             Box::new(move |progress| {
                 let state = progress_state.clone();
@@ -369,5 +414,27 @@ async fn run_transcription(
     // Mark as completed
     db.update_recording_state(&recording.id, RecordingState::Completed)?;
 
+    let audio_path = std::path::Path::new(&audio_path);
+    if let Err(e) = maybe_compress_transcribed_audio(settings, &db, &recording.id, audio_path) {
+        warn!(
+            "Failed to compress {} after transcription: {}",
+            recording.id,
+            e
+        );
+    }
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn compresses_only_wav_when_enabled() {
+        assert!(should_compress_after_transcription(true, Path::new("meeting.wav")));
+        assert!(!should_compress_after_transcription(true, Path::new("meeting.ogg")));
+        assert!(!should_compress_after_transcription(false, Path::new("meeting.wav")));
+    }
 }

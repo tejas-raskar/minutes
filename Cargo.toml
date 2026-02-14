@@ -21,11 +21,14 @@ ratatui = "0.27"
 crossterm = "0.27"
 
 # Audio
-# Note: pipewire-rs requires libpipewire-dev on your system
-# pipewire = "0.8"
-# Using cpal for broader compatibility initially
+# PipeWire for Linux (primary) - requires libpipewire-0.3-dev
+pipewire = { version = "0.8", optional = true }
+# cpal as fallback for macOS/Windows
 cpal = "0.15"
 hound = "3.5"
+# OGG Opus encoding
+opus = "0.3"
+ogg = "0.9"
 
 # Transcription
 # Note: whisper-rs requires whisper.cpp to be built
@@ -40,7 +43,8 @@ serde_json = "1"
 toml = "0.8"
 
 # HTTP client (for Gemini API - post-MVP)
-reqwest = { version = "0.12", features = ["json", "stream"], optional = true }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+async-trait = "0.1"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
@@ -51,6 +55,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 thiserror = "1"
 
+# Unix signal handling
+libc = "0.2"
+
 # IPC
 interprocess = { version = "2", features = ["tokio"] }
 
@@ -59,8 +66,8 @@ tempfile = "3"
 tokio-test = "0.4"
 
 [features]
-default = []
-llm = ["reqwest"]
+default = ["pipewire"]
+pipewire = ["dep:pipewire"]
 
 [[bin]]
 name = "minutes"

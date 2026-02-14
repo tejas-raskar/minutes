@@ -1,17 +1,25 @@
-//! Audio capture implementation using cpal
+//! Audio capture implementation using cpal (cross-platform fallback)
+//!
+//! This backend captures microphone input only. For system audio capture
+//! on Linux, use the PipeWire backend.
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
 use hound::{WavSpec, WavWriter};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::config::Settings;
 
-/// Audio capture state
-pub struct AudioCapture {
+use super::AudioCapture;
+
+/// Audio capture using cpal (cross-platform)
+///
+/// This is the fallback backend that works on all platforms but only
+/// captures microphone input (not system audio).
+pub struct CpalCapture {
     /// WAV writer
     writer: Arc<Mutex<Option<WavWriter<std::io::BufWriter<std::fs::File>>>>>,
 
@@ -26,14 +34,27 @@ pub struct AudioCapture {
 
     /// Number of channels
     channels: u16,
+
+    /// Current output path
+    output_path: Option<PathBuf>,
 }
 
-impl AudioCapture {
-    /// Create a new audio capture instance
-    pub fn new(settings: &Settings, output_path: &Path) -> Result<Self> {
-        let sample_rate = settings.audio.sample_rate;
-        let channels = settings.audio.channels;
+impl CpalCapture {
+    /// Create a new cpal capture instance
+    pub fn new(settings: &Settings) -> Result<Self> {
+        Ok(Self {
+            writer: Arc::new(Mutex::new(None)),
+            stream: None,
+            recording: Arc::new(AtomicBool::new(false)),
+            sample_rate: settings.audio.sample_rate,
+            channels: settings.audio.channels,
+            output_path: None,
+        })
+    }
+}
 
+impl AudioCapture for CpalCapture {
+    fn start(&mut self, output_path: &Path) -> Result<()> {
         // Ensure output directory exists
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -41,8 +62,8 @@ impl AudioCapture {
 
         // Create WAV writer
         let spec = WavSpec {
-            channels,
-            sample_rate,
+            channels: self.channels,
+            sample_rate: self.sample_rate,
             bits_per_sample: 16,
             sample_format: hound::SampleFormat::Int,
         };
@@ -50,17 +71,9 @@ impl AudioCapture {
         let writer = WavWriter::create(output_path, spec)
             .with_context(|| format!("Failed to create WAV file: {}", output_path.display()))?;
 
-        Ok(Self {
-            writer: Arc::new(Mutex::new(Some(writer))),
-            stream: None,
-            recording: Arc::new(AtomicBool::new(false)),
-            sample_rate,
-            channels,
-        })
-    }
+        *self.writer.lock().unwrap() = Some(writer);
+        self.output_path = Some(output_path.to_path_buf());
 
-    /// Start recording
-    pub fn start(&mut self) -> Result<()> {
         let host = cpal::default_host();
 
         // Get default input device
@@ -68,7 +81,10 @@ impl AudioCapture {
             .default_input_device()
             .context("No input device available")?;
 
-        tracing::info!("Using audio device: {}", device.name().unwrap_or_default());
+        tracing::info!(
+            "cpal: Using audio device: {}",
+            device.name().unwrap_or_default()
+        );
 
         // Get supported config
         let supported_configs = device
@@ -79,7 +95,7 @@ impl AudioCapture {
         let config = find_suitable_config(supported_configs, self.sample_rate, self.channels)?;
 
         tracing::info!(
-            "Audio config: {} Hz, {} channels, {:?}",
+            "cpal: Audio config: {} Hz, {} channels, {:?}",
             config.sample_rate().0,
             config.channels(),
             config.sample_format()
@@ -119,12 +135,11 @@ impl AudioCapture {
         stream.play().context("Failed to start audio stream")?;
         self.stream = Some(stream);
 
-        tracing::info!("Audio recording started");
+        tracing::info!("cpal: Audio recording started");
         Ok(())
     }
 
-    /// Stop recording
-    pub fn stop(&mut self) -> Result<()> {
+    fn stop(&mut self) -> Result<()> {
         self.recording.store(false, Ordering::SeqCst);
 
         // Drop the stream to stop recording
@@ -137,17 +152,20 @@ impl AudioCapture {
             }
         }
 
-        tracing::info!("Audio recording stopped");
+        tracing::info!("cpal: Audio recording stopped");
         Ok(())
     }
 
-    /// Check if recording is active
-    pub fn is_recording(&self) -> bool {
+    fn is_recording(&self) -> bool {
         self.recording.load(Ordering::SeqCst)
+    }
+
+    fn backend_name(&self) -> &'static str {
+        "cpal"
     }
 }
 
-impl Drop for AudioCapture {
+impl Drop for CpalCapture {
     fn drop(&mut self) {
         let _ = self.stop();
     }
