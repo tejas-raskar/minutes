@@ -44,6 +44,15 @@ pub struct PipeWireCapture {
     mic_path: Option<PathBuf>,
 }
 
+const SYSTEM_TARGET_FALLBACK: &str = "@DEFAULT_AUDIO_SINK.monitor";
+const MICROPHONE_TARGET_FALLBACK: &str = "@DEFAULT_AUDIO_SOURCE@";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TargetKind {
+    System,
+    Microphone,
+}
+
 impl PipeWireCapture {
     /// Create a new PipeWire capture instance
     pub fn new(settings: &Settings) -> Result<Self> {
@@ -99,17 +108,19 @@ impl AudioCapture for PipeWireCapture {
         self.recording.store(true, Ordering::SeqCst);
 
         if targets.len() == 2 {
+            let system_target = targets[0].as_str();
+            let mic_target = targets[1].as_str();
             let mic_path = output_path.with_extension("mic.wav");
 
             let system_process = spawn_pw_record(
-                "@DEFAULT_AUDIO_SINK.monitor",
+                system_target,
                 self.sample_rate,
                 self.channels,
                 output_path,
             )?;
 
             let mic_process = match spawn_pw_record(
-                "@DEFAULT_AUDIO_SOURCE@",
+                mic_target,
                 self.sample_rate,
                 self.channels,
                 &mic_path,
@@ -133,24 +144,34 @@ impl AudioCapture for PipeWireCapture {
             self.mic_path = Some(mic_path);
 
             tracing::info!(
-                "PipeWire: Recording system monitor + microphone via dual pw-record"
+                "PipeWire: Recording system monitor + microphone via dual pw-record (system_target={}, mic_target={})",
+                system_target,
+                mic_target
             );
-        } else if targets[0] == "@DEFAULT_AUDIO_SINK.monitor" {
+        } else if self.capture_system {
+            let system_target = targets[0].as_str();
             self.system_process = Some(spawn_pw_record(
-                targets[0],
+                system_target,
                 self.sample_rate,
                 self.channels,
                 output_path,
             )?);
-            tracing::info!("PipeWire: Recording system monitor via pw-record");
+            tracing::info!(
+                "PipeWire: Recording system monitor via pw-record (system_target={})",
+                system_target
+            );
         } else {
+            let mic_target = targets[0].as_str();
             self.mic_process = Some(spawn_pw_record(
-                targets[0],
+                mic_target,
                 self.sample_rate,
                 self.channels,
                 output_path,
             )?);
-            tracing::info!("PipeWire: Recording microphone via pw-record");
+            tracing::info!(
+                "PipeWire: Recording microphone via pw-record (mic_target={})",
+                mic_target
+            );
         }
 
         Ok(())
@@ -312,15 +333,69 @@ fn read_wav_as_f32(path: &Path) -> Result<(u32, u16, Vec<f32>)> {
     Ok((spec.sample_rate, spec.channels, samples))
 }
 
-fn capture_targets(capture_system: bool, capture_microphone: bool) -> Vec<&'static str> {
+fn capture_targets(capture_system: bool, capture_microphone: bool) -> Vec<String> {
+    capture_targets_with_resolver(capture_system, capture_microphone, resolve_target)
+}
+
+fn capture_targets_with_resolver<F>(
+    capture_system: bool,
+    capture_microphone: bool,
+    resolver: F,
+) -> Vec<String>
+where
+    F: Fn(TargetKind) -> Option<String>,
+{
     let mut targets = Vec::new();
     if capture_system {
-        targets.push("@DEFAULT_AUDIO_SINK.monitor");
+        targets.push(
+            resolver(TargetKind::System).unwrap_or_else(|| SYSTEM_TARGET_FALLBACK.to_string()),
+        );
     }
     if capture_microphone {
-        targets.push("@DEFAULT_AUDIO_SOURCE@");
+        targets.push(
+            resolver(TargetKind::Microphone)
+                .unwrap_or_else(|| MICROPHONE_TARGET_FALLBACK.to_string()),
+        );
     }
     targets
+}
+
+fn resolve_target(kind: TargetKind) -> Option<String> {
+    let alias = match kind {
+        TargetKind::System => "@DEFAULT_AUDIO_SINK@",
+        TargetKind::Microphone => "@DEFAULT_AUDIO_SOURCE@",
+    };
+    resolve_wpctl_node_id(alias).or_else(|| {
+        tracing::debug!("PipeWire: failed to resolve target id for alias {}", alias);
+        None
+    })
+}
+
+fn resolve_wpctl_node_id(alias: &str) -> Option<String> {
+    let output = Command::new("wpctl")
+        .args(["inspect", alias])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_wpctl_node_id(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_wpctl_node_id(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let id_part = trimmed.strip_prefix("id ")?.split(',').next()?.trim();
+        if id_part.chars().all(|c| c.is_ascii_digit()) {
+            Some(id_part.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 impl Drop for PipeWireCapture {
@@ -337,8 +412,26 @@ mod tests {
 
     #[test]
     fn selects_monitor_and_microphone_targets_when_both_enabled() {
-        let targets = capture_targets(true, true);
+        let targets = capture_targets_with_resolver(true, true, |kind| match kind {
+            TargetKind::System => Some("61".to_string()),
+            TargetKind::Microphone => Some("62".to_string()),
+        });
+        assert_eq!(targets, vec!["61", "62"]);
+    }
+
+    #[test]
+    fn falls_back_to_alias_targets_when_resolution_fails() {
+        let targets = capture_targets_with_resolver(true, true, |_| None);
         assert_eq!(targets, vec!["@DEFAULT_AUDIO_SINK.monitor", "@DEFAULT_AUDIO_SOURCE@"]);
+    }
+
+    #[test]
+    fn parses_wpctl_node_id() {
+        let output = r#"
+id 61, type PipeWire:Interface:Node
+    node.name = "alsa_output.pci-0000_65_00.6.analog-stereo"
+"#;
+        assert_eq!(parse_wpctl_node_id(output), Some("61".to_string()));
     }
 
     #[test]
