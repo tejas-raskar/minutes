@@ -43,6 +43,9 @@ async fn main() -> Result<()> {
         Commands::Search { query } => {
             minutes::cli::commands::search_transcripts(&settings, &query).await?;
         }
+        Commands::Doctor => {
+            minutes::cli::commands::run_doctor(&settings).await?;
+        }
         Commands::Summarize { id } => {
             minutes::cli::commands::summarize_recording(&settings, &id).await?;
         }

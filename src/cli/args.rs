@@ -55,6 +55,9 @@ pub enum Commands {
         query: String,
     },
 
+    /// Run environment diagnostics (audio/backend checks)
+    Doctor,
+
     /// Generate and store an AI summary for a recording
     Summarize {
         /// Recording ID or partial ID

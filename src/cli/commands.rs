@@ -3,7 +3,9 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
+use crate::audio::AudioBackend;
 use crate::cli::args::{ConfigCommand, DaemonCommand};
 use crate::config::Settings;
 use crate::daemon::client::DaemonClient;
@@ -15,11 +17,14 @@ use crate::storage::{Database, Recording};
 pub async fn start_recording(settings: &Settings, title: Option<String>) -> Result<()> {
     let mut client = DaemonClient::connect(settings).await?;
 
-    let title = title.unwrap_or_else(|| {
-        format!("Meeting {}", Local::now().format("%Y-%m-%d %H:%M"))
-    });
+    let title =
+        title.unwrap_or_else(|| format!("Meeting {}", Local::now().format("%Y-%m-%d %H:%M")));
 
-    let response = client.send(DaemonRequest::StartRecording { title: title.clone() }).await?;
+    let response = client
+        .send(DaemonRequest::StartRecording {
+            title: title.clone(),
+        })
+        .await?;
 
     match response {
         DaemonResponse::RecordingStarted { id } => {
@@ -78,26 +83,29 @@ pub async fn show_status(settings: &Settings) -> Result<()> {
     let response = client.send(DaemonRequest::GetStatus).await?;
 
     match response {
-        DaemonResponse::Status(status) => {
-            match status {
-                RecordingStatus::Idle => {
-                    println!("Status: Idle (not recording)");
-                }
-                RecordingStatus::Recording { id, title, duration_secs, .. } => {
-                    let minutes = duration_secs / 60;
-                    let seconds = duration_secs % 60;
-                    println!("Status: Recording");
-                    println!("  Title: {}", title);
-                    println!("  ID: {}", &id[..8]);
-                    println!("  Duration: {}:{:02}", minutes, seconds);
-                }
-                RecordingStatus::Transcribing { id, progress } => {
-                    println!("Status: Transcribing");
-                    println!("  ID: {}", &id[..8]);
-                    println!("  Progress: {:.0}%", progress * 100.0);
-                }
+        DaemonResponse::Status(status) => match status {
+            RecordingStatus::Idle => {
+                println!("Status: Idle (not recording)");
             }
-        }
+            RecordingStatus::Recording {
+                id,
+                title,
+                duration_secs,
+                ..
+            } => {
+                let minutes = duration_secs / 60;
+                let seconds = duration_secs % 60;
+                println!("Status: Recording");
+                println!("  Title: {}", title);
+                println!("  ID: {}", &id[..8]);
+                println!("  Duration: {}:{:02}", minutes, seconds);
+            }
+            RecordingStatus::Transcribing { id, progress } => {
+                println!("Status: Transcribing");
+                println!("  ID: {}", &id[..8]);
+                println!("  Progress: {:.0}%", progress * 100.0);
+            }
+        },
         DaemonResponse::Error { message } => {
             anyhow::bail!("Failed to get status: {}", message);
         }
@@ -128,7 +136,10 @@ pub async fn list_recordings(
         return Ok(());
     }
 
-    println!("{:<10} {:<30} {:<12} {:<10}", "ID", "Title", "Date", "Duration");
+    println!(
+        "{:<10} {:<30} {:<12} {:<10}",
+        "ID", "Title", "Date", "Duration"
+    );
     println!("{}", "-".repeat(65));
 
     for recording in recordings {
@@ -192,7 +203,10 @@ pub async fn summarize_recording(settings: &Settings, id: &str) -> Result<()> {
 
     let segments = db.get_transcript_segments(&recording.id)?;
     if segments.is_empty() {
-        anyhow::bail!("No transcript available for recording {}", &recording.id[..8]);
+        anyhow::bail!(
+            "No transcript available for recording {}",
+            &recording.id[..8]
+        );
     }
 
     let transcript = build_summary_transcript(&segments);
@@ -235,7 +249,11 @@ pub async fn search_transcripts(settings: &Settings, query: &str) -> Result<()> 
             if !current_recording_id.is_empty() {
                 println!();
             }
-            println!("== {} ({}) ==", recording.title, recording.created_at.format("%Y-%m-%d"));
+            println!(
+                "== {} ({}) ==",
+                recording.title,
+                recording.created_at.format("%Y-%m-%d")
+            );
             current_recording_id = recording.id.clone();
         }
 
@@ -303,19 +321,17 @@ pub async fn daemon_command(settings: &Settings, cmd: DaemonCommand) -> Result<(
             crate::daemon::start_daemon(settings)?;
             println!("Daemon restarted");
         }
-        DaemonCommand::Status => {
-            match DaemonClient::connect(settings).await {
-                Ok(mut client) => {
-                    let response = client.send(DaemonRequest::Ping).await?;
-                    if matches!(response, DaemonResponse::Pong) {
-                        println!("Daemon is running");
-                    }
-                }
-                Err(_) => {
-                    println!("Daemon is not running");
+        DaemonCommand::Status => match DaemonClient::connect(settings).await {
+            Ok(mut client) => {
+                let response = client.send(DaemonRequest::Ping).await?;
+                if matches!(response, DaemonResponse::Pong) {
+                    println!("Daemon is running");
                 }
             }
-        }
+            Err(_) => {
+                println!("Daemon is not running");
+            }
+        },
     }
 
     Ok(())
@@ -354,7 +370,86 @@ pub fn config_command(settings: &Settings, cmd: ConfigCommand) -> Result<()> {
     Ok(())
 }
 
+/// Run diagnostic checks to help troubleshoot local setup issues.
+pub async fn run_doctor(settings: &Settings) -> Result<()> {
+    println!("minutes doctor");
+    println!("backend: {:?}", settings.audio.backend);
+    println!(
+        "capture: system={} microphone={}",
+        settings.audio.capture_system, settings.audio.capture_microphone
+    );
+    println!();
+
+    let pw_record_ok = command_exists("pw-record");
+    let wpctl_ok = command_exists("wpctl");
+
+    print_check("pw-record", pw_record_ok, "required for PipeWire capture");
+    print_check("wpctl", wpctl_ok, "used for default sink/source resolution");
+
+    match settings.audio.backend {
+        AudioBackend::Cpal => {
+            println!("info: cpal backend is microphone-only; system audio capture is unavailable.");
+        }
+        AudioBackend::Auto | AudioBackend::PipeWire => {
+            #[cfg(feature = "pipewire")]
+            {
+                if settings.audio.capture_system || settings.audio.capture_microphone {
+                    println!();
+                    println!("PipeWire target resolution:");
+                    let resolved = crate::audio::resolve_capture_targets(
+                        settings.audio.capture_system,
+                        settings.audio.capture_microphone,
+                    );
+
+                    for target in &resolved {
+                        println!(
+                            "  - {} target: {} ({})",
+                            target.kind.label(),
+                            target.target,
+                            target.method.as_str()
+                        );
+                    }
+
+                    if resolved.iter().any(|target| {
+                        target.method == crate::audio::TargetResolutionMethod::FallbackAlias
+                    }) {
+                        println!(
+                            "warning: at least one target used alias fallback; on some setups this may capture microphone instead of monitor."
+                        );
+                        println!(
+                            "hint: ensure PipeWire/WirePlumber are running and `wpctl inspect @DEFAULT_AUDIO_SINK@` works."
+                        );
+                    } else {
+                        println!("ok: capture targets resolved to concrete PipeWire node ids.");
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "pipewire"))]
+            {
+                println!("warning: this build has no PipeWire feature enabled.");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // Helper functions
+
+fn command_exists(bin: &str) -> bool {
+    Command::new(bin)
+        .arg("--help")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
+}
+
+fn print_check(name: &str, ok: bool, detail: &str) {
+    let status = if ok { "ok" } else { "missing" };
+    println!("{:<10} {:<8} {}", name, status, detail);
+}
 
 fn format_duration(secs: u64) -> String {
     let hours = secs / 3600;
@@ -407,7 +502,10 @@ fn build_summary_transcript(segments: &[TranscriptSegment]) -> String {
 fn export_as_txt(recording: &Recording, segments: &[TranscriptSegment]) -> String {
     let mut output = String::new();
     output.push_str(&format!("Title: {}\n", recording.title));
-    output.push_str(&format!("Date: {}\n", recording.created_at.format("%Y-%m-%d %H:%M")));
+    output.push_str(&format!(
+        "Date: {}\n",
+        recording.created_at.format("%Y-%m-%d %H:%M")
+    ));
     if let Some(duration) = recording.duration_secs {
         output.push_str(&format!("Duration: {}\n", format_duration(duration)));
     }
@@ -428,7 +526,10 @@ fn export_as_json(recording: &Recording, segments: &[TranscriptSegment]) -> Resu
         segments: &'a [TranscriptSegment],
     }
 
-    let data = ExportData { recording, segments };
+    let data = ExportData {
+        recording,
+        segments,
+    };
     Ok(serde_json::to_string_pretty(&data)?)
 }
 

@@ -17,6 +17,8 @@ pub use mixer::AudioMixer;
 
 #[cfg(feature = "pipewire")]
 pub use pipewire_capture::PipeWireCapture;
+#[cfg(feature = "pipewire")]
+pub(crate) use pipewire_capture::{resolve_capture_targets, TargetResolutionMethod};
 
 use anyhow::Result;
 use std::path::Path;

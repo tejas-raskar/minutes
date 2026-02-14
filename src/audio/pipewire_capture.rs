@@ -46,11 +46,46 @@ pub struct PipeWireCapture {
 
 const SYSTEM_TARGET_FALLBACK: &str = "@DEFAULT_AUDIO_SINK.monitor";
 const MICROPHONE_TARGET_FALLBACK: &str = "@DEFAULT_AUDIO_SOURCE@";
+const SYSTEM_ALIAS: &str = "@DEFAULT_AUDIO_SINK@";
+const MICROPHONE_ALIAS: &str = "@DEFAULT_AUDIO_SOURCE@";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TargetKind {
+pub(crate) enum TargetKind {
     System,
     Microphone,
+}
+
+impl TargetKind {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            TargetKind::System => "system",
+            TargetKind::Microphone => "microphone",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TargetResolutionMethod {
+    WpctlInspect,
+    WpctlStatus,
+    FallbackAlias,
+}
+
+impl TargetResolutionMethod {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            TargetResolutionMethod::WpctlInspect => "wpctl-inspect",
+            TargetResolutionMethod::WpctlStatus => "wpctl-status",
+            TargetResolutionMethod::FallbackAlias => "fallback-alias",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ResolvedCaptureTarget {
+    pub(crate) kind: TargetKind,
+    pub(crate) target: String,
+    pub(crate) method: TargetResolutionMethod,
 }
 
 impl PipeWireCapture {
@@ -112,12 +147,8 @@ impl AudioCapture for PipeWireCapture {
             let mic_target = targets[1].as_str();
             let mic_path = output_path.with_extension("mic.wav");
 
-            let system_process = spawn_pw_record(
-                system_target,
-                self.sample_rate,
-                self.channels,
-                output_path,
-            )?;
+            let system_process =
+                spawn_pw_record(system_target, self.sample_rate, self.channels, output_path)?;
 
             let mic_process = match spawn_pw_record(
                 mic_target,
@@ -188,10 +219,9 @@ impl AudioCapture for PipeWireCapture {
             wait_for_process(child);
         }
 
-        if let (Some(output_path), Some(mic_path)) = (
-            self.output_path.as_ref(),
-            self.mic_path.take(),
-        ) {
+        if let (Some(output_path), Some(mic_path)) =
+            (self.output_path.as_ref(), self.mic_path.take())
+        {
             if let Err(e) = maybe_mix_microphone_track(output_path, &mic_path, self.mic_boost) {
                 tracing::warn!(
                     "PipeWire: failed to mix microphone track, keeping system-only capture: {}",
@@ -215,7 +245,12 @@ impl AudioCapture for PipeWireCapture {
     }
 }
 
-fn spawn_pw_record(target: &str, sample_rate: u32, channels: u16, output_path: &Path) -> Result<Child> {
+fn spawn_pw_record(
+    target: &str,
+    sample_rate: u32,
+    channels: u16,
+    output_path: &Path,
+) -> Result<Child> {
     Command::new("pw-record")
         .args([
             "--target",
@@ -252,7 +287,12 @@ fn wait_for_process(mut child: Child) {
     }
 }
 
-fn mix_wav_files(system_path: &Path, mic_path: &Path, output_path: &Path, mic_boost: f32) -> Result<()> {
+fn mix_wav_files(
+    system_path: &Path,
+    mic_path: &Path,
+    output_path: &Path,
+    mic_boost: f32,
+) -> Result<()> {
     let (system_rate, system_channels, mut system_samples) = read_wav_as_f32(system_path)?;
     let (mic_rate, mic_channels, mut mic_samples) = read_wav_as_f32(mic_path)?;
 
@@ -319,9 +359,10 @@ fn read_wav_as_f32(path: &Path) -> Result<(u32, u16, Vec<f32>)> {
             .filter_map(|s| s.ok())
             .map(|s| s as f32 / 2147483648.0)
             .collect(),
-        (hound::SampleFormat::Float, 32) => {
-            reader.into_samples::<f32>().filter_map(|s| s.ok()).collect()
-        }
+        (hound::SampleFormat::Float, 32) => reader
+            .into_samples::<f32>()
+            .filter_map(|s| s.ok())
+            .collect(),
         _ => anyhow::bail!(
             "Unsupported WAV format in {}: {:?} {}-bit",
             path.display(),
@@ -334,6 +375,16 @@ fn read_wav_as_f32(path: &Path) -> Result<(u32, u16, Vec<f32>)> {
 }
 
 fn capture_targets(capture_system: bool, capture_microphone: bool) -> Vec<String> {
+    resolve_capture_targets(capture_system, capture_microphone)
+        .into_iter()
+        .map(|target| target.target)
+        .collect()
+}
+
+pub(crate) fn resolve_capture_targets(
+    capture_system: bool,
+    capture_microphone: bool,
+) -> Vec<ResolvedCaptureTarget> {
     capture_targets_with_resolver(capture_system, capture_microphone, resolve_target)
 }
 
@@ -341,34 +392,55 @@ fn capture_targets_with_resolver<F>(
     capture_system: bool,
     capture_microphone: bool,
     resolver: F,
-) -> Vec<String>
+) -> Vec<ResolvedCaptureTarget>
 where
-    F: Fn(TargetKind) -> Option<String>,
+    F: Fn(TargetKind) -> ResolvedCaptureTarget,
 {
     let mut targets = Vec::new();
     if capture_system {
-        targets.push(
-            resolver(TargetKind::System).unwrap_or_else(|| SYSTEM_TARGET_FALLBACK.to_string()),
-        );
+        targets.push(resolver(TargetKind::System));
     }
     if capture_microphone {
-        targets.push(
-            resolver(TargetKind::Microphone)
-                .unwrap_or_else(|| MICROPHONE_TARGET_FALLBACK.to_string()),
-        );
+        targets.push(resolver(TargetKind::Microphone));
     }
     targets
 }
 
-fn resolve_target(kind: TargetKind) -> Option<String> {
+fn resolve_target(kind: TargetKind) -> ResolvedCaptureTarget {
     let alias = match kind {
-        TargetKind::System => "@DEFAULT_AUDIO_SINK@",
-        TargetKind::Microphone => "@DEFAULT_AUDIO_SOURCE@",
+        TargetKind::System => SYSTEM_ALIAS,
+        TargetKind::Microphone => MICROPHONE_ALIAS,
     };
-    resolve_wpctl_node_id(alias).or_else(|| {
-        tracing::debug!("PipeWire: failed to resolve target id for alias {}", alias);
-        None
-    })
+
+    if let Some(id) = resolve_wpctl_node_id(alias) {
+        return ResolvedCaptureTarget {
+            kind,
+            target: id,
+            method: TargetResolutionMethod::WpctlInspect,
+        };
+    }
+
+    if let Some(id) = resolve_wpctl_default_node_id(kind) {
+        return ResolvedCaptureTarget {
+            kind,
+            target: id,
+            method: TargetResolutionMethod::WpctlStatus,
+        };
+    }
+
+    tracing::debug!(
+        "PipeWire: failed to resolve {} target id, using alias fallback",
+        kind.label()
+    );
+
+    ResolvedCaptureTarget {
+        kind,
+        target: match kind {
+            TargetKind::System => SYSTEM_TARGET_FALLBACK.to_string(),
+            TargetKind::Microphone => MICROPHONE_TARGET_FALLBACK.to_string(),
+        },
+        method: TargetResolutionMethod::FallbackAlias,
+    }
 }
 
 fn resolve_wpctl_node_id(alias: &str) -> Option<String> {
@@ -386,6 +458,21 @@ fn resolve_wpctl_node_id(alias: &str) -> Option<String> {
     parse_wpctl_node_id(&String::from_utf8_lossy(&output.stdout))
 }
 
+fn resolve_wpctl_default_node_id(kind: TargetKind) -> Option<String> {
+    let output = Command::new("wpctl")
+        .args(["status", "-n"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_wpctl_status_default_node_id(&String::from_utf8_lossy(&output.stdout), kind)
+}
+
 fn parse_wpctl_node_id(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         let trimmed = line.trim();
@@ -396,6 +483,69 @@ fn parse_wpctl_node_id(output: &str) -> Option<String> {
             None
         }
     })
+}
+
+fn parse_wpctl_status_default_node_id(output: &str, kind: TargetKind) -> Option<String> {
+    let section_label = match kind {
+        TargetKind::System => "Sinks:",
+        TargetKind::Microphone => "Sources:",
+    };
+
+    let mut in_section = false;
+    let mut first_seen_id: Option<String> = None;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.ends_with(section_label) {
+            in_section = true;
+            continue;
+        }
+
+        if !in_section {
+            continue;
+        }
+
+        if trimmed.ends_with("Filters:") || trimmed.ends_with("Streams:") {
+            break;
+        }
+
+        let Some((id, is_default)) = parse_wpctl_status_node_line(trimmed) else {
+            continue;
+        };
+
+        if is_default {
+            return Some(id);
+        }
+
+        if first_seen_id.is_none() {
+            first_seen_id = Some(id);
+        }
+    }
+
+    first_seen_id
+}
+
+fn parse_wpctl_status_node_line(line: &str) -> Option<(String, bool)> {
+    let is_default = line.contains('*');
+    let mut digits = String::new();
+    let mut started = false;
+
+    for ch in line.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+            started = true;
+            continue;
+        }
+        if started {
+            break;
+        }
+    }
+
+    if digits.is_empty() {
+        None
+    } else {
+        Some((digits, is_default))
+    }
 }
 
 impl Drop for PipeWireCapture {
@@ -413,16 +563,34 @@ mod tests {
     #[test]
     fn selects_monitor_and_microphone_targets_when_both_enabled() {
         let targets = capture_targets_with_resolver(true, true, |kind| match kind {
-            TargetKind::System => Some("61".to_string()),
-            TargetKind::Microphone => Some("62".to_string()),
+            TargetKind::System => ResolvedCaptureTarget {
+                kind,
+                target: "61".to_string(),
+                method: TargetResolutionMethod::WpctlInspect,
+            },
+            TargetKind::Microphone => ResolvedCaptureTarget {
+                kind,
+                target: "62".to_string(),
+                method: TargetResolutionMethod::WpctlInspect,
+            },
         });
-        assert_eq!(targets, vec!["61", "62"]);
+        assert_eq!(targets[0].target, "61");
+        assert_eq!(targets[1].target, "62");
     }
 
     #[test]
     fn falls_back_to_alias_targets_when_resolution_fails() {
-        let targets = capture_targets_with_resolver(true, true, |_| None);
-        assert_eq!(targets, vec!["@DEFAULT_AUDIO_SINK.monitor", "@DEFAULT_AUDIO_SOURCE@"]);
+        let targets = capture_targets_with_resolver(true, true, |kind| ResolvedCaptureTarget {
+            kind,
+            target: match kind {
+                TargetKind::System => SYSTEM_TARGET_FALLBACK.to_string(),
+                TargetKind::Microphone => MICROPHONE_TARGET_FALLBACK.to_string(),
+            },
+            method: TargetResolutionMethod::FallbackAlias,
+        });
+        assert_eq!(targets[0].target, "@DEFAULT_AUDIO_SINK.monitor");
+        assert_eq!(targets[1].target, "@DEFAULT_AUDIO_SOURCE@");
+        assert_eq!(targets[0].method, TargetResolutionMethod::FallbackAlias);
     }
 
     #[test]
@@ -432,6 +600,42 @@ id 61, type PipeWire:Interface:Node
     node.name = "alsa_output.pci-0000_65_00.6.analog-stereo"
 "#;
         assert_eq!(parse_wpctl_node_id(output), Some("61".to_string()));
+    }
+
+    #[test]
+    fn parses_default_sink_id_from_wpctl_status_output() {
+        let status = r#"
+Audio
+ ├─ Sinks:
+ │  *   61. alsa_output.pci-0000_65_00.6.analog-stereo [vol: 0.44]
+ │      72. bluez_output.14:06:A7:95:AC:6C [vol: 0.34]
+ │
+ ├─ Sources:
+ │  *   62. alsa_input.pci-0000_65_00.6.analog-stereo [vol: 0.39 MUTED]
+"#;
+
+        assert_eq!(
+            parse_wpctl_status_default_node_id(status, TargetKind::System),
+            Some("61".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_default_source_id_from_wpctl_status_output() {
+        let status = r#"
+Audio
+ ├─ Sinks:
+ │  *   61. alsa_output.pci-0000_65_00.6.analog-stereo [vol: 0.44]
+ │
+ ├─ Sources:
+ │      55. monitor-source
+ │  *   62. alsa_input.pci-0000_65_00.6.analog-stereo [vol: 0.39 MUTED]
+"#;
+
+        assert_eq!(
+            parse_wpctl_status_default_node_id(status, TargetKind::Microphone),
+            Some("62".to_string())
+        );
     }
 
     #[test]
