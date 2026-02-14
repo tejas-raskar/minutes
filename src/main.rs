@@ -43,6 +43,9 @@ async fn main() -> Result<()> {
         Commands::Search { query } => {
             minutes::cli::commands::search_transcripts(&settings, &query).await?;
         }
+        Commands::Summarize { id } => {
+            minutes::cli::commands::summarize_recording(&settings, &id).await?;
+        }
         Commands::Export { id, format, output } => {
             minutes::cli::commands::export_recording(&settings, &id, &format, output).await?;
         }

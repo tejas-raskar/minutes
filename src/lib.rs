@@ -6,12 +6,10 @@ pub mod audio;
 pub mod cli;
 pub mod config;
 pub mod daemon;
+pub mod llm;
 pub mod storage;
 pub mod transcription;
 pub mod tui;
-
-#[cfg(feature = "llm")]
-pub mod llm;
 
 use thiserror::Error;
 

@@ -8,6 +8,7 @@ use crate::cli::args::{ConfigCommand, DaemonCommand};
 use crate::config::Settings;
 use crate::daemon::client::DaemonClient;
 use crate::daemon::ipc::{DaemonRequest, DaemonResponse, RecordingStatus};
+use crate::llm::{build_provider, SummaryRequest};
 use crate::storage::{Database, Recording};
 
 /// Start a new recording
@@ -158,6 +159,12 @@ pub async fn view_recording(settings: &Settings, id: &str) -> Result<()> {
     if let Some(duration) = recording.duration_secs {
         println!("Duration: {}", format_duration(duration));
     }
+
+    if let Some(summary) = recording.notes.as_deref() {
+        println!();
+        println!("Summary:");
+        println!("{}", summary);
+    }
     println!();
 
     let segments = db.get_transcript_segments(&recording.id)?;
@@ -171,6 +178,38 @@ pub async fn view_recording(settings: &Settings, id: &str) -> Result<()> {
         let timestamp = format_timestamp(segment.start_time);
         println!("[{}] {}", timestamp, segment.text);
     }
+
+    Ok(())
+}
+
+/// Generate and store an AI summary for a recording.
+pub async fn summarize_recording(settings: &Settings, id: &str) -> Result<()> {
+    let db = Database::open(settings)?;
+
+    let mut recording = db
+        .find_recording_by_prefix(id)?
+        .context("Recording not found")?;
+
+    let segments = db.get_transcript_segments(&recording.id)?;
+    if segments.is_empty() {
+        anyhow::bail!("No transcript available for recording {}", &recording.id[..8]);
+    }
+
+    let transcript = build_summary_transcript(&segments);
+    let provider = build_provider(settings)?;
+    let summary = provider
+        .summarize(SummaryRequest {
+            title: &recording.title,
+            transcript: &transcript,
+        })
+        .await?;
+
+    recording.notes = Some(summary.clone());
+    db.update_recording(&recording)?;
+
+    println!("Summary saved for {}:", &recording.id[..8]);
+    println!();
+    println!("{}", summary);
 
     Ok(())
 }
@@ -351,6 +390,19 @@ fn truncate(s: &str, max_len: usize) -> String {
 }
 
 use crate::storage::TranscriptSegment;
+
+fn build_summary_transcript(segments: &[TranscriptSegment]) -> String {
+    let mut transcript = String::new();
+    for segment in segments {
+        let timestamp = format_timestamp(segment.start_time);
+        transcript.push('[');
+        transcript.push_str(&timestamp);
+        transcript.push_str("] ");
+        transcript.push_str(&segment.text);
+        transcript.push('\n');
+    }
+    transcript
+}
 
 fn export_as_txt(recording: &Recording, segments: &[TranscriptSegment]) -> String {
     let mut output = String::new();

@@ -55,6 +55,12 @@ pub enum Commands {
         query: String,
     },
 
+    /// Generate and store an AI summary for a recording
+    Summarize {
+        /// Recording ID or partial ID
+        id: String,
+    },
+
     /// Export a recording to a file
     Export {
         /// Recording ID
