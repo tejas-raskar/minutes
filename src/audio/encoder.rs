@@ -77,7 +77,10 @@ impl OggEncoder {
         let samples: Vec<i16> = match spec.sample_format {
             hound::SampleFormat::Int => {
                 if spec.bits_per_sample == 16 {
-                    reader.into_samples::<i16>().filter_map(Result::ok).collect()
+                    reader
+                        .into_samples::<i16>()
+                        .filter_map(Result::ok)
+                        .collect()
                 } else if spec.bits_per_sample == 32 {
                     reader
                         .into_samples::<i32>()
@@ -160,7 +163,11 @@ impl OggEncoder {
                 granule_pos += frame_size as u64;
 
                 // Determine if this is the last page
-                let header_type = if chunk.len() < samples_per_frame { 4 } else { 0 };
+                let header_type = if chunk.len() < samples_per_frame {
+                    4
+                } else {
+                    0
+                };
 
                 write_ogg_page(
                     &mut ogg_file,
@@ -204,8 +211,9 @@ impl OggEncoder {
         self.encode(wav_path, &ogg_path)?;
 
         // Verify OGG file exists and has content
-        let ogg_meta = std::fs::metadata(&ogg_path)
-            .with_context(|| format!("OGG file not found after encoding: {}", ogg_path.display()))?;
+        let ogg_meta = std::fs::metadata(&ogg_path).with_context(|| {
+            format!("OGG file not found after encoding: {}", ogg_path.display())
+        })?;
 
         if ogg_meta.len() == 0 {
             anyhow::bail!("OGG file is empty after encoding");

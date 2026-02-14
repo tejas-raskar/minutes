@@ -58,10 +58,7 @@ impl AudioMixer {
 
     /// Mix and convert to i16 samples for WAV output
     pub fn mix_to_i16(&self, system: &[f32], mic: &[f32]) -> Vec<i16> {
-        self.mix(system, mic)
-            .into_iter()
-            .map(f32_to_i16)
-            .collect()
+        self.mix(system, mic).into_iter().map(f32_to_i16).collect()
     }
 
     /// Convert stereo to mono by averaging channels
@@ -151,7 +148,7 @@ mod tests {
         let sys = vec![0.5, 0.3, -0.2];
         let mic = vec![0.2, -0.1, 0.4];
         let result = mixer.mix(&sys, &mic);
-        
+
         assert_eq!(result.len(), 3);
         assert!((result[0] - soft_clip(0.7)).abs() < 0.01);
         assert!((result[1] - 0.2).abs() < 0.01);
@@ -164,7 +161,7 @@ mod tests {
         let sys = vec![0.5, 0.3];
         let mic = vec![0.2, -0.1, 0.4, 0.1];
         let result = mixer.mix(&sys, &mic);
-        
+
         assert_eq!(result.len(), 4);
     }
 
@@ -179,7 +176,7 @@ mod tests {
     fn test_stereo_to_mono() {
         let stereo = vec![0.4, 0.6, 0.2, 0.8];
         let mono = AudioMixer::stereo_to_mono(&stereo);
-        
+
         assert_eq!(mono.len(), 2);
         assert!((mono[0] - 0.5).abs() < 0.01);
         assert!((mono[1] - 0.5).abs() < 0.01);
@@ -190,7 +187,7 @@ mod tests {
         let mixer = AudioMixer::new(16000, 1.0);
         let samples = vec![0.1, 0.2, 0.3];
         let result = mixer.resample(&samples, 16000);
-        
+
         assert_eq!(result, samples);
     }
 }
