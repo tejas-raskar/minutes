@@ -40,8 +40,6 @@ pub struct PipeWireCapture {
     mic_process: Option<Child>,
     /// Current output path
     output_path: Option<PathBuf>,
-    /// Temporary system capture path used when dual capture is active
-    system_path: Option<PathBuf>,
     /// Temporary microphone capture path used when dual capture is active
     mic_path: Option<PathBuf>,
 }
@@ -70,7 +68,6 @@ impl PipeWireCapture {
             system_process: None,
             mic_process: None,
             output_path: None,
-            system_path: None,
             mic_path: None,
         })
     }
@@ -102,14 +99,13 @@ impl AudioCapture for PipeWireCapture {
         self.recording.store(true, Ordering::SeqCst);
 
         if targets.len() == 2 {
-            let system_path = output_path.with_extension("system.wav");
             let mic_path = output_path.with_extension("mic.wav");
 
             let system_process = spawn_pw_record(
                 "@DEFAULT_AUDIO_SINK.monitor",
                 self.sample_rate,
                 self.channels,
-                &system_path,
+                output_path,
             )?;
 
             let mic_process = match spawn_pw_record(
@@ -120,16 +116,20 @@ impl AudioCapture for PipeWireCapture {
             ) {
                 Ok(process) => process,
                 Err(e) => {
-                    wait_for_process(system_process);
-                    let _ = std::fs::remove_file(&system_path);
-                    return Err(e);
+                    self.system_process = Some(system_process);
+                    self.mic_process = None;
+                    self.mic_path = None;
+                    tracing::warn!(
+                        "PipeWire: microphone capture unavailable, continuing with system audio only: {}",
+                        e
+                    );
+                    return Ok(());
                 }
             };
 
             self.system_process = Some(system_process);
             self.mic_process = Some(mic_process);
 
-            self.system_path = Some(system_path);
             self.mic_path = Some(mic_path);
 
             tracing::info!(
@@ -167,13 +167,17 @@ impl AudioCapture for PipeWireCapture {
             wait_for_process(child);
         }
 
-        if let (Some(output_path), Some(system_path), Some(mic_path)) = (
+        if let (Some(output_path), Some(mic_path)) = (
             self.output_path.as_ref(),
-            self.system_path.take(),
             self.mic_path.take(),
         ) {
-            mix_wav_files(&system_path, &mic_path, output_path, self.mic_boost)?;
-            let _ = std::fs::remove_file(&system_path);
+            if let Err(e) = maybe_mix_microphone_track(output_path, &mic_path, self.mic_boost) {
+                tracing::warn!(
+                    "PipeWire: failed to mix microphone track, keeping system-only capture: {}",
+                    e
+                );
+            }
+
             let _ = std::fs::remove_file(&mic_path);
         }
 
@@ -264,6 +268,20 @@ fn mix_wav_files(system_path: &Path, mic_path: &Path, output_path: &Path, mic_bo
     Ok(())
 }
 
+fn maybe_mix_microphone_track(output_path: &Path, mic_path: &Path, mic_boost: f32) -> Result<()> {
+    if !mic_path.exists() {
+        return Ok(());
+    }
+
+    // WAV file with header only (no samples) means mic was effectively silent/unavailable.
+    let mic_size = std::fs::metadata(mic_path)?.len();
+    if mic_size <= 44 {
+        return Ok(());
+    }
+
+    mix_wav_files(output_path, mic_path, output_path, mic_boost)
+}
+
 fn read_wav_as_f32(path: &Path) -> Result<(u32, u16, Vec<f32>)> {
     let reader = WavReader::open(path)
         .with_context(|| format!("Failed to open WAV file: {}", path.display()))?;
@@ -314,6 +332,8 @@ impl Drop for PipeWireCapture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hound::{SampleFormat, WavWriter};
+    use tempfile::tempdir;
 
     #[test]
     fn selects_monitor_and_microphone_targets_when_both_enabled() {
@@ -324,5 +344,48 @@ mod tests {
     #[test]
     fn fails_when_no_capture_sources_enabled() {
         assert!(capture_targets(false, false).is_empty());
+    }
+
+    #[test]
+    fn keeps_system_capture_when_mic_track_missing() {
+        let dir = tempdir().unwrap();
+        let system_path = dir.path().join("system.wav");
+        let missing_mic_path = dir.path().join("missing.wav");
+
+        write_test_wav(&system_path, &[1000, -1000, 500, -500]);
+        maybe_mix_microphone_track(&system_path, &missing_mic_path, 1.2).unwrap();
+
+        let (_, _, samples) = read_wav_as_f32(&system_path).unwrap();
+        assert_eq!(samples.len(), 4);
+    }
+
+    #[test]
+    fn keeps_system_capture_when_mic_track_is_empty() {
+        let dir = tempdir().unwrap();
+        let system_path = dir.path().join("system.wav");
+        let mic_path = dir.path().join("mic.wav");
+
+        write_test_wav(&system_path, &[1000, -1000, 500, -500]);
+        write_test_wav(&mic_path, &[]);
+
+        maybe_mix_microphone_track(&system_path, &mic_path, 1.2).unwrap();
+
+        let (_, _, samples) = read_wav_as_f32(&system_path).unwrap();
+        assert_eq!(samples.len(), 4);
+    }
+
+    fn write_test_wav(path: &Path, samples: &[i16]) {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+
+        let mut writer = WavWriter::create(path, spec).unwrap();
+        for sample in samples {
+            writer.write_sample(*sample).unwrap();
+        }
+        writer.finalize().unwrap();
     }
 }
