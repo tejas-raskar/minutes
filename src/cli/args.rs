@@ -56,7 +56,11 @@ pub enum Commands {
     },
 
     /// Run environment diagnostics (audio/backend checks)
-    Doctor,
+    Doctor {
+        /// Print machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Generate and store an AI summary for a recording
     Summarize {

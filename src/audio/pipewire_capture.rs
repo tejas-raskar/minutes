@@ -492,7 +492,7 @@ fn parse_wpctl_status_default_node_id(output: &str, kind: TargetKind) -> Option<
     };
 
     let mut in_section = false;
-    let mut first_seen_id: Option<String> = None;
+    let mut nodes: Vec<(String, String, bool)> = Vec::new();
 
     for line in output.lines() {
         let trimmed = line.trim();
@@ -509,43 +509,67 @@ fn parse_wpctl_status_default_node_id(output: &str, kind: TargetKind) -> Option<
             break;
         }
 
-        let Some((id, is_default)) = parse_wpctl_status_node_line(trimmed) else {
+        let Some((id, name, is_default)) = parse_wpctl_status_node_line(trimmed) else {
             continue;
         };
 
-        if is_default {
-            return Some(id);
-        }
+        nodes.push((id, name, is_default));
+    }
 
-        if first_seen_id.is_none() {
-            first_seen_id = Some(id);
+    if let Some((id, _, _)) = nodes.iter().find(|(_, _, is_default)| *is_default) {
+        return Some(id.clone());
+    }
+
+    if let Some(configured_name) = parse_wpctl_configured_default_name(output, kind) {
+        if let Some((id, _, _)) = nodes.iter().find(|(_, name, _)| name == &configured_name) {
+            return Some(id.clone());
         }
     }
 
-    first_seen_id
+    nodes.first().map(|(id, _, _)| id.clone())
 }
 
-fn parse_wpctl_status_node_line(line: &str) -> Option<(String, bool)> {
+fn parse_wpctl_status_node_line(line: &str) -> Option<(String, String, bool)> {
     let is_default = line.contains('*');
-    let mut digits = String::new();
-    let mut started = false;
+    let mut chars = line.char_indices().peekable();
+    let mut start = None;
 
-    for ch in line.chars() {
+    while let Some((idx, ch)) = chars.next() {
         if ch.is_ascii_digit() {
-            digits.push(ch);
-            started = true;
-            continue;
-        }
-        if started {
+            start = Some(idx);
             break;
         }
     }
 
-    if digits.is_empty() {
-        None
-    } else {
-        Some((digits, is_default))
+    let start = start?;
+    let mut end = start;
+    for (idx, ch) in line[start..].char_indices() {
+        if !ch.is_ascii_digit() {
+            break;
+        }
+        end = start + idx + ch.len_utf8();
     }
+
+    let id = line[start..end].to_string();
+    let after_id = line[end..].trim_start();
+    let after_dot = after_id.strip_prefix('.')?.trim_start();
+    let name = after_dot.split_whitespace().next().map(str::to_string)?;
+
+    Some((id, name, is_default))
+}
+
+fn parse_wpctl_configured_default_name(output: &str, kind: TargetKind) -> Option<String> {
+    let key = match kind {
+        TargetKind::System => "Audio/Sink",
+        TargetKind::Microphone => "Audio/Source",
+    };
+
+    output.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let (_, after_key) = trimmed.split_once(key)?;
+        let name = after_key.split_whitespace().next()?;
+        Some(name.to_string())
+    })
 }
 
 impl Drop for PipeWireCapture {
@@ -635,6 +659,53 @@ Audio
         assert_eq!(
             parse_wpctl_status_default_node_id(status, TargetKind::Microphone),
             Some("62".to_string())
+        );
+    }
+
+    #[test]
+    fn uses_configured_sink_name_when_status_has_no_default_marker() {
+        let status = r#"
+Audio
+ ├─ Sinks:
+ │      10. alsa_output.pci-0000_65_00.6.analog-stereo
+ │      20. bluez_output.14:06:A7:95:AC:6C
+ │
+ ├─ Sources:
+ │      30. alsa_input.pci-0000_65_00.6.analog-stereo
+
+Settings
+ └─ Default Configured Devices:
+         0. Audio/Sink    bluez_output.14:06:A7:95:AC:6C
+         1. Audio/Source  alsa_input.pci-0000_65_00.6.analog-stereo
+"#;
+
+        assert_eq!(
+            parse_wpctl_status_default_node_id(status, TargetKind::System),
+            Some("20".to_string())
+        );
+    }
+
+    #[test]
+    fn uses_configured_source_name_when_status_has_no_default_marker() {
+        let status = r#"
+Audio
+ ├─ Sinks:
+ │      10. alsa_output.pci-0000_65_00.6.analog-stereo
+ │      20. bluez_output.14:06:A7:95:AC:6C
+ │
+ ├─ Sources:
+ │      30. alsa_input.pci-0000_65_00.6.analog-stereo
+ │      40. filter_input.echo-cancel
+
+Settings
+ └─ Default Configured Devices:
+         0. Audio/Sink    bluez_output.14:06:A7:95:AC:6C
+         1. Audio/Source  filter_input.echo-cancel
+"#;
+
+        assert_eq!(
+            parse_wpctl_status_default_node_id(status, TargetKind::Microphone),
+            Some("40".to_string())
         );
     }
 

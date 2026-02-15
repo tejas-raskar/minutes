@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Local;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -370,69 +371,151 @@ pub fn config_command(settings: &Settings, cmd: ConfigCommand) -> Result<()> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct DoctorCapture {
+    system: bool,
+    microphone: bool,
+}
+
+#[derive(Serialize)]
+struct DoctorCheck {
+    name: &'static str,
+    status: &'static str,
+    detail: &'static str,
+}
+
+#[derive(Serialize)]
+struct DoctorPipeWireTarget {
+    kind: String,
+    target: String,
+    method: &'static str,
+}
+
+#[derive(Serialize)]
+struct DoctorReport {
+    backend: String,
+    capture: DoctorCapture,
+    checks: Vec<DoctorCheck>,
+    pipewire_targets: Vec<DoctorPipeWireTarget>,
+    notes: Vec<String>,
+}
+
 /// Run diagnostic checks to help troubleshoot local setup issues.
-pub async fn run_doctor(settings: &Settings) -> Result<()> {
+pub async fn run_doctor(settings: &Settings, json: bool) -> Result<()> {
+    let report = collect_doctor_report(settings);
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
     println!("minutes doctor");
-    println!("backend: {:?}", settings.audio.backend);
+    println!("backend: {}", report.backend);
     println!(
         "capture: system={} microphone={}",
-        settings.audio.capture_system, settings.audio.capture_microphone
+        report.capture.system, report.capture.microphone
     );
     println!();
 
+    for check in &report.checks {
+        println!("{:<10} {:<8} {}", check.name, check.status, check.detail);
+    }
+
+    if !report.pipewire_targets.is_empty() {
+        println!();
+        println!("PipeWire target resolution:");
+        for target in &report.pipewire_targets {
+            println!(
+                "  - {} target: {} ({})",
+                target.kind, target.target, target.method
+            );
+        }
+    }
+
+    if !report.notes.is_empty() {
+        println!();
+        for note in &report.notes {
+            println!("{}", note);
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_doctor_report(settings: &Settings) -> DoctorReport {
     let pw_record_ok = command_exists("pw-record");
     let wpctl_ok = command_exists("wpctl");
 
-    print_check("pw-record", pw_record_ok, "required for PipeWire capture");
-    print_check("wpctl", wpctl_ok, "used for default sink/source resolution");
+    let mut notes = Vec::new();
+    let mut pipewire_targets = Vec::new();
 
     match settings.audio.backend {
         AudioBackend::Cpal => {
-            println!("info: cpal backend is microphone-only; system audio capture is unavailable.");
+            notes.push(
+                "info: cpal backend is microphone-only; system audio capture is unavailable."
+                    .to_string(),
+            );
         }
         AudioBackend::Auto | AudioBackend::PipeWire => {
             #[cfg(feature = "pipewire")]
             {
                 if settings.audio.capture_system || settings.audio.capture_microphone {
-                    println!();
-                    println!("PipeWire target resolution:");
                     let resolved = crate::audio::resolve_capture_targets(
                         settings.audio.capture_system,
                         settings.audio.capture_microphone,
                     );
 
                     for target in &resolved {
-                        println!(
-                            "  - {} target: {} ({})",
-                            target.kind.label(),
-                            target.target,
-                            target.method.as_str()
-                        );
+                        pipewire_targets.push(DoctorPipeWireTarget {
+                            kind: target.kind.label().to_string(),
+                            target: target.target.clone(),
+                            method: target.method.as_str(),
+                        });
                     }
 
                     if resolved.iter().any(|target| {
                         target.method == crate::audio::TargetResolutionMethod::FallbackAlias
                     }) {
-                        println!(
-                            "warning: at least one target used alias fallback; on some setups this may capture microphone instead of monitor."
-                        );
-                        println!(
-                            "hint: ensure PipeWire/WirePlumber are running and `wpctl inspect @DEFAULT_AUDIO_SINK@` works."
-                        );
+                        notes.push("warning: at least one target used alias fallback; this can capture microphone instead of monitor on some setups.".to_string());
+                        notes.push("hint: ensure PipeWire/WirePlumber are running and `wpctl inspect @DEFAULT_AUDIO_SINK@` works.".to_string());
+                        notes.push("hint: run `wpctl status -n` and confirm a default sink/source is available.".to_string());
                     } else {
-                        println!("ok: capture targets resolved to concrete PipeWire node ids.");
+                        notes.push(
+                            "ok: capture targets resolved to concrete PipeWire node ids."
+                                .to_string(),
+                        );
                     }
                 }
             }
 
             #[cfg(not(feature = "pipewire"))]
             {
-                println!("warning: this build has no PipeWire feature enabled.");
+                notes.push("warning: this build has no PipeWire feature enabled.".to_string());
             }
         }
     }
 
-    Ok(())
+    DoctorReport {
+        backend: format!("{:?}", settings.audio.backend),
+        capture: DoctorCapture {
+            system: settings.audio.capture_system,
+            microphone: settings.audio.capture_microphone,
+        },
+        checks: vec![
+            DoctorCheck {
+                name: "pw-record",
+                status: if pw_record_ok { "ok" } else { "missing" },
+                detail: "required for PipeWire capture",
+            },
+            DoctorCheck {
+                name: "wpctl",
+                status: if wpctl_ok { "ok" } else { "missing" },
+                detail: "used for default sink/source resolution",
+            },
+        ],
+        pipewire_targets,
+        notes,
+    }
 }
 
 // Helper functions
@@ -444,11 +527,6 @@ fn command_exists(bin: &str) -> bool {
         .stderr(Stdio::null())
         .status()
         .is_ok()
-}
-
-fn print_check(name: &str, ok: bool, detail: &str) {
-    let status = if ok { "ok" } else { "missing" };
-    println!("{:<10} {:<8} {}", name, status, detail);
 }
 
 fn format_duration(secs: u64) -> String {

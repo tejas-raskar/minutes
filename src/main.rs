@@ -14,7 +14,11 @@ async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer().with_target(false))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(std::io::stderr),
+        )
         .init();
 
     // Load configuration
@@ -43,8 +47,8 @@ async fn main() -> Result<()> {
         Commands::Search { query } => {
             minutes::cli::commands::search_transcripts(&settings, &query).await?;
         }
-        Commands::Doctor => {
-            minutes::cli::commands::run_doctor(&settings).await?;
+        Commands::Doctor { json } => {
+            minutes::cli::commands::run_doctor(&settings, json).await?;
         }
         Commands::Summarize { id } => {
             minutes::cli::commands::summarize_recording(&settings, &id).await?;
