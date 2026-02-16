@@ -150,5 +150,6 @@ For released changes, see `CHANGELOG.md`.
 
 ## Next steps
 
-If you are preparing a release, follow `docs/RELEASE.md` for the release smoke
-flow, tagging steps, and publish checklist.
+Download the latest published binaries from GitHub Releases, then follow the
+quick start flow above to validate audio capture and summarization on your
+machine.
