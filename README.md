@@ -13,7 +13,7 @@ turning them into searchable notes.
 - Record system audio and microphone audio.
 - Transcribe recordings locally with Whisper.
 - Store transcripts and metadata in a local SQLite database.
-- Generate and persist one summary per recording with Gemini (v1).
+- Generate and persist one summary per recording with Gemini.
 
 ## Current scope
 
@@ -35,37 +35,55 @@ and tools.
 - `pw-record` and `pw-play` (`pipewire-tools` on many distros).
 - A Whisper model file, for example `ggml-base.bin`.
 
-## Quick start
+## Install options
 
-Use these steps to run a complete local setup and first recording.
+You can either download a prebuilt binary from GitHub Releases or build from
+source.
 
-1. Build the CLI binary.
+### Option 1: Use a prebuilt Linux binary
+
+Each release publishes Linux tarballs for:
+
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu`
+
+Download the matching archive from the project's Releases page, extract it, and
+put `bin/minutes` on your `PATH`.
+
+### Option 2: Build from source
 
 ```bash
 cd minutes
 cargo build --bin minutes
 ```
 
-2. Install a Whisper model.
+## Quick start
+
+Use these steps to run a complete local setup and first recording.
+
+If you built from source, run commands as `cargo run -- <command>`. If you
+installed a release binary, run them as `minutes <command>`.
+
+1. Install a Whisper model.
 
 ```bash
 ./scripts/install-models.sh base
 ```
 
-3. Set your Gemini API key for summaries.
+2. Set your Gemini API key for summaries.
 
 ```bash
 export MINUTES_GEMINI_API_KEY="your_key_here"
 ```
 
-4. Run diagnostics to verify your audio environment.
+3. Run diagnostics to verify your audio environment.
 
 ```bash
 cargo run -- doctor
 cargo run -- doctor --json
 ```
 
-5. Start the daemon and record a meeting.
+4. Start the daemon and record a meeting.
 
 ```bash
 cargo run -- daemon start
@@ -74,7 +92,7 @@ cargo run -- start -t "Team sync"
 cargo run -- stop
 ```
 
-6. List, inspect, and summarize the recording.
+5. List, inspect, and summarize the recording.
 
 ```bash
 cargo run -- list
