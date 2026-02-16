@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    name: Build (${{ matrix.build }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - build: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpipewire-0.3-dev pkg-config libssl-dev
+
+      - name: Build release binary
+        env:
+          GGML_CCACHE: "OFF"
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin minutes
+
+      - name: Package release artifact
+        shell: bash
+        run: |
+          BINARY_NAME="minutes"
+          RELEASE_VERSION="${{ github.ref_name }}"
+
+          ROOT_DIR="${BINARY_NAME}-${RELEASE_VERSION}-${{ matrix.target }}"
+          mkdir -p "${ROOT_DIR}/bin"
+
+          cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "${ROOT_DIR}/bin/"
+          chmod +x "${ROOT_DIR}/bin/${BINARY_NAME}"
+
+          cp LICENSE README.md CHANGELOG.md "${ROOT_DIR}/"
+
+          ASSET_NAME="${ROOT_DIR}.tar.gz"
+          tar -czf "${ASSET_NAME}" "${ROOT_DIR}"
+          sha256sum "${ASSET_NAME}" > "${ASSET_NAME}.sha256"
+
+          echo "ASSET=${ASSET_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256
