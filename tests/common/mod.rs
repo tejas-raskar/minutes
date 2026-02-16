@@ -31,6 +31,7 @@ impl TestEnv {
             .env("XDG_CONFIG_HOME", self.config.path())
             .env("XDG_DATA_HOME", self.data.path())
             .env("XDG_RUNTIME_DIR", self.runtime.path())
+            .env_remove("RUST_LOG")
             .env_remove("MINUTES_GEMINI_API_KEY")
             .output()
             .expect("failed to execute minutes binary")

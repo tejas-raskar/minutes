@@ -137,6 +137,7 @@ fn summarize_success_is_persisted_and_visible_in_view() {
 
     let summarize_stdout = String::from_utf8_lossy(&output.stdout);
     assert!(summarize_stdout.contains("Summary saved for"));
+    assert!(summarize_stdout.contains("View it with: minutes view"));
     assert!(summarize_stdout.contains("Launch moved to Friday."));
 
     let view = env.run(&["view", &recording_id[..8]]);
@@ -149,6 +150,7 @@ fn summarize_success_is_persisted_and_visible_in_view() {
 
     let view_stdout = String::from_utf8_lossy(&view.stdout);
     assert!(view_stdout.contains("Summary:"));
+    assert!(view_stdout.contains("Transcript:"));
     assert!(view_stdout.contains("Launch moved to Friday."));
 }
 

@@ -11,18 +11,26 @@ use minutes::config::Settings;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse CLI arguments first so logging verbosity can follow flags.
+    let cli = Cli::parse();
+
     // Initialize logging
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        if cli.verbose {
+            EnvFilter::new("info")
+        } else {
+            EnvFilter::new("warn")
+        }
+    });
+
     tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(filter)
         .with(
             tracing_subscriber::fmt::layer()
                 .with_target(false)
                 .with_writer(std::io::stderr),
         )
         .init();
-
-    // Parse CLI arguments
-    let cli = Cli::parse();
 
     match cli.command {
         Commands::Completions { shell } => {

@@ -76,7 +76,7 @@ pub async fn show_status(settings: &Settings) -> Result<()> {
     let mut client = match DaemonClient::connect(settings).await {
         Ok(c) => c,
         Err(_) => {
-            println!("Daemon is not running");
+            print_daemon_not_running();
             return Ok(());
         }
     };
@@ -126,16 +126,34 @@ pub async fn list_recordings(
 ) -> Result<()> {
     let db = Database::open(settings)?;
 
-    let recordings = if let Some(query) = search {
-        db.search_recordings(&query, limit)?
+    let query = search.as_deref();
+    let recordings = if let Some(query) = query {
+        db.search_recordings(query, limit)?
     } else {
         db.list_recordings(limit)?
     };
 
     if recordings.is_empty() {
-        println!("No recordings found");
+        if let Some(query) = query {
+            println!("No recordings found for query \"{}\".", query);
+            println!("Try listing recent meetings with: minutes list");
+        } else {
+            println!("No recordings found.");
+            println!("Start a meeting recording with: minutes start -t \"Team sync\"");
+        }
         return Ok(());
     }
+
+    if let Some(query) = query {
+        println!(
+            "Showing {} recording(s) matching \"{}\":",
+            recordings.len(),
+            query
+        );
+    } else {
+        println!("Showing {} recent recording(s):", recordings.len());
+    }
+    println!();
 
     println!(
         "{:<10} {:<30} {:<12} {:<10}",
@@ -166,23 +184,32 @@ pub async fn view_recording(settings: &Settings, id: &str) -> Result<()> {
         .find_recording_by_prefix(id)?
         .context("Recording not found")?;
 
-    println!("Title: {}", recording.title);
-    println!("Date: {}", recording.created_at.format("%Y-%m-%d %H:%M"));
+    println!("Recording:");
+    println!("  ID: {}", &recording.id[..8]);
+    println!("  Title: {}", recording.title);
+    println!("  State: {}", recording.state.as_str());
+    println!("  Date: {}", recording.created_at.format("%Y-%m-%d %H:%M"));
     if let Some(duration) = recording.duration_secs {
-        println!("Duration: {}", format_duration(duration));
-    }
-
-    if let Some(summary) = recording.notes.as_deref() {
-        println!();
-        println!("Summary:");
-        println!("{}", summary);
+        println!("  Duration: {}", format_duration(duration));
     }
     println!();
 
-    let segments = db.get_transcript_segments(&recording.id)?;
+    if let Some(summary) = recording.notes.as_deref() {
+        println!("Summary:");
+        println!("{}", summary);
+    } else {
+        println!("Summary:");
+        println!(
+            "(Not generated yet. Run: minutes summarize {})",
+            &recording.id[..8]
+        );
+    }
+    println!();
 
+    println!("Transcript:");
+    let segments = db.get_transcript_segments(&recording.id)?;
     if segments.is_empty() {
-        println!("(No transcript available yet)");
+        println!("(No transcript available yet. Wait for transcription to finish.)");
         return Ok(());
     }
 
@@ -201,6 +228,8 @@ pub async fn summarize_recording(settings: &Settings, id: &str) -> Result<()> {
     let mut recording = db
         .find_recording_by_prefix(id)?
         .context("Recording not found")?;
+
+    println!("Generating summary for {}...", &recording.id[..8]);
 
     let segments = db.get_transcript_segments(&recording.id)?;
     if segments.is_empty() {
@@ -222,8 +251,10 @@ pub async fn summarize_recording(settings: &Settings, id: &str) -> Result<()> {
     recording.notes = Some(summary.clone());
     db.update_recording(&recording)?;
 
-    println!("Summary saved for {}:", &recording.id[..8]);
+    println!("Summary saved for {}.", &recording.id[..8]);
+    println!("View it with: minutes view {}", &recording.id[..8]);
     println!();
+    println!("Summary:");
     println!("{}", summary);
 
     Ok(())
@@ -236,7 +267,8 @@ pub async fn search_transcripts(settings: &Settings, query: &str) -> Result<()> 
     let results = db.search_transcripts(query, 20)?;
 
     if results.is_empty() {
-        println!("No results found for: {}", query);
+        println!("No transcript matches found for \"{}\".", query);
+        println!("Try listing meetings first: minutes list");
         return Ok(());
     }
 
@@ -330,7 +362,7 @@ pub async fn daemon_command(settings: &Settings, cmd: DaemonCommand) -> Result<(
                 }
             }
             Err(_) => {
-                println!("Daemon is not running");
+                print_daemon_not_running();
             }
         },
     }
@@ -560,6 +592,11 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len - 3])
     }
+}
+
+fn print_daemon_not_running() {
+    println!("Daemon is not running.");
+    println!("Start it with: minutes daemon start");
 }
 
 use crate::storage::TranscriptSegment;
