@@ -115,6 +115,7 @@ This list summarizes the main command surface in `0.1.0`.
 - `minutes export <id> --format txt|json|srt`
 - `minutes daemon start|stop|restart|status`
 - `minutes config show|path|init`
+- `minutes completions bash|zsh|fish|powershell`
 
 ## Configuration
 

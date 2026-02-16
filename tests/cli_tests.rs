@@ -16,6 +16,11 @@ fn minutes_help_shows_usage() {
     );
     assert!(stdout.contains("Usage:"));
     assert!(stdout.contains("Commands:"));
+    assert!(
+        !stderr.contains("No config file found"),
+        "--help should not log config fallback noise\nstderr:\n{}",
+        stderr
+    );
 }
 
 #[test]
@@ -31,6 +36,30 @@ fn minutes_version_shows_version() {
         stderr
     );
     assert!(stdout.contains("minutes "));
+    assert!(
+        !stderr.contains("No config file found"),
+        "--version should not log config fallback noise\nstderr:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn completions_bash_outputs_script() {
+    let output = run_minutes(&["completions", "bash"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "completions bash should succeed\nstdout:\n{}\nstderr:\n{}",
+        stdout,
+        stderr
+    );
+    assert!(
+        stdout.contains("minutes"),
+        "expected completion output to reference command name\nstdout:\n{}",
+        stdout
+    );
 }
 
 #[test]

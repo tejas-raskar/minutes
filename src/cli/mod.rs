@@ -4,5 +4,6 @@
 
 pub mod args;
 pub mod commands;
+pub mod completions;
 
 pub use args::{Cli, Commands, ConfigCommand, DaemonCommand};

@@ -1,6 +1,7 @@
 //! CLI argument definitions using clap
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use std::path::PathBuf;
 
 /// minutes - Meeting recording, transcription, and AI-powered insights
@@ -92,6 +93,12 @@ pub enum Commands {
     /// Configuration management
     #[command(subcommand)]
     Config(ConfigCommand),
+
+    /// Generate shell completion scripts
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand, Debug)]
