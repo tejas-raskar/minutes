@@ -185,7 +185,7 @@ fn default_llm_provider() -> String {
 }
 
 fn default_llm_model() -> String {
-    "gemini-1.5-flash".to_string()
+    "gemini-2.5-flash".to_string()
 }
 
 fn default_recent_count() -> usize {
@@ -359,5 +359,16 @@ impl Settings {
     /// Get the path to a whisper model file
     pub fn model_path(&self) -> PathBuf {
         self.whisper.models_dir.join(format!("ggml-{}.bin", self.whisper.model))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_to_gemini_25_flash() {
+        let settings = Settings::default();
+        assert_eq!(settings.llm.model, "gemini-2.5-flash");
     }
 }

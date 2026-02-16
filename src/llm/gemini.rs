@@ -8,7 +8,7 @@ use crate::llm::client::{LlmProvider, SummaryRequest};
 use crate::llm::prompts::build_summary_prompt;
 
 const DEFAULT_GEMINI_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta";
-const DEFAULT_GEMINI_MODEL: &str = "gemini-1.5-flash";
+const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash";
 
 pub struct GeminiClient {
     http: Client,
