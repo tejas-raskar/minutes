@@ -39,17 +39,15 @@ impl Repository {
 
     /// Start transcription for a recording
     pub fn start_transcription(&self, id: &str) -> Result<()> {
-        self.db.update_recording_state(id, RecordingState::Transcribing)
+        self.db
+            .update_recording_state(id, RecordingState::Transcribing)
     }
 
     /// Complete transcription for a recording
-    pub fn complete_transcription(
-        &self,
-        id: &str,
-        segments: &[TranscriptSegment],
-    ) -> Result<()> {
+    pub fn complete_transcription(&self, id: &str, segments: &[TranscriptSegment]) -> Result<()> {
         self.db.insert_segments(segments)?;
-        self.db.update_recording_state(id, RecordingState::Completed)
+        self.db
+            .update_recording_state(id, RecordingState::Completed)
     }
 
     /// Mark transcription as failed

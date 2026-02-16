@@ -35,7 +35,12 @@ impl GeminiClient {
         let endpoint = if settings.llm.endpoint.trim().is_empty() {
             DEFAULT_GEMINI_ENDPOINT.to_string()
         } else {
-            settings.llm.endpoint.trim().trim_end_matches('/').to_string()
+            settings
+                .llm
+                .endpoint
+                .trim()
+                .trim_end_matches('/')
+                .to_string()
         };
 
         Ok(Self {

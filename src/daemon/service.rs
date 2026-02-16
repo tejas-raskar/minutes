@@ -1,7 +1,7 @@
 //! Main daemon service implementation
 
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -10,7 +10,9 @@ use crate::audio::{create_capture, AudioCapture, OggEncoder};
 use crate::config::Settings;
 use crate::daemon::ipc::{DaemonRequest, DaemonResponse};
 use crate::daemon::server::{CommandReceiver, IpcServer};
-use crate::daemon::state::{ActiveRecording, DaemonState, SharedState, TranscriptionState, new_shared_state};
+use crate::daemon::state::{
+    new_shared_state, ActiveRecording, DaemonState, SharedState, TranscriptionState,
+};
 use crate::storage::{Database, Recording, RecordingState};
 use crate::transcription::TranscriptionPipeline;
 
@@ -130,7 +132,10 @@ async fn handle_start_recording(
                     message: format!("Failed to start audio capture: {}", e),
                 };
             }
-            info!("Audio capture started with {} backend", capture.backend_name());
+            info!(
+                "Audio capture started with {} backend",
+                capture.backend_name()
+            );
             *audio_capture = Some(capture);
         }
         Err(e) => {
@@ -229,7 +234,7 @@ async fn handle_stop_recording(
 }
 
 /// Compress WAV file to OGG Opus
-fn compress_to_ogg(settings: &Settings, wav_path: &PathBuf) -> Result<PathBuf> {
+fn compress_to_ogg(settings: &Settings, wav_path: &Path) -> Result<PathBuf> {
     let encoder = OggEncoder::new(
         settings.audio.sample_rate,
         settings.audio.channels as u8,
@@ -358,7 +363,8 @@ async fn transcription_worker(settings: Settings, state: SharedState) {
                 Err(e) => {
                     error!("Transcription failed for {}: {}", recording.id, e);
                     // Mark as failed
-                    if let Err(e) = db.update_recording_state(&recording.id, RecordingState::Failed) {
+                    if let Err(e) = db.update_recording_state(&recording.id, RecordingState::Failed)
+                    {
                         error!("Failed to update recording state: {}", e);
                     }
                 }
@@ -418,8 +424,7 @@ async fn run_transcription(
     if let Err(e) = maybe_compress_transcribed_audio(settings, &db, &recording.id, audio_path) {
         warn!(
             "Failed to compress {} after transcription: {}",
-            recording.id,
-            e
+            recording.id, e
         );
     }
 
@@ -433,8 +438,17 @@ mod tests {
 
     #[test]
     fn compresses_only_wav_when_enabled() {
-        assert!(should_compress_after_transcription(true, Path::new("meeting.wav")));
-        assert!(!should_compress_after_transcription(true, Path::new("meeting.ogg")));
-        assert!(!should_compress_after_transcription(false, Path::new("meeting.wav")));
+        assert!(should_compress_after_transcription(
+            true,
+            Path::new("meeting.wav")
+        ));
+        assert!(!should_compress_after_transcription(
+            true,
+            Path::new("meeting.ogg")
+        ));
+        assert!(!should_compress_after_transcription(
+            false,
+            Path::new("meeting.wav")
+        ));
     }
 }

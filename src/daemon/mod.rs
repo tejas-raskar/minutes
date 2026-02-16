@@ -64,9 +64,7 @@ pub fn start_daemon(settings: &Settings) -> Result<()> {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    anyhow::bail!(
-        "Daemon start timed out. Run `minutes daemon start --foreground` for details."
-    )
+    anyhow::bail!("Daemon start timed out. Run `minutes daemon start --foreground` for details.")
 }
 
 /// Run the daemon in the foreground

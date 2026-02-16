@@ -316,7 +316,7 @@ fn write_ogg_page<W: Write>(
     header.extend_from_slice(&0u32.to_le_bytes());
 
     // Segment count and table
-    let segment_count = (data.len() + 254) / 255;
+    let segment_count = data.len().div_ceil(255);
     header.push(segment_count as u8);
 
     let mut remaining = data.len();

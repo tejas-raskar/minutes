@@ -12,6 +12,12 @@ pub struct DashboardScreen {
     // Add any dashboard-specific state here
 }
 
+impl Default for DashboardScreen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DashboardScreen {
     pub fn new() -> Self {
         Self {}
@@ -21,10 +27,10 @@ impl DashboardScreen {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Title
-                Constraint::Length(7),  // Status
-                Constraint::Min(5),     // Info
-                Constraint::Length(3),  // Help
+                Constraint::Length(3), // Title
+                Constraint::Length(7), // Status
+                Constraint::Min(5),    // Info
+                Constraint::Length(3), // Help
             ])
             .split(area);
 
@@ -113,14 +119,12 @@ impl DashboardScreen {
             ),
         };
 
-        let status_widget = Paragraph::new(status_text)
-            .style(status_style)
-            .block(
-                Block::default()
-                    .title(" Recording Status ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
-            );
+        let status_widget = Paragraph::new(status_text).style(status_style).block(
+            Block::default()
+                .title(" Recording Status ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
         frame.render_widget(status_widget, chunks[1]);
 
         // Info section
@@ -149,14 +153,12 @@ impl DashboardScreen {
             ]),
         ];
 
-        let info_widget = Paragraph::new(info_text)
-            .wrap(Wrap { trim: true })
-            .block(
-                Block::default()
-                    .title(" Info ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::DarkGray)),
-            );
+        let info_widget = Paragraph::new(info_text).wrap(Wrap { trim: true }).block(
+            Block::default()
+                .title(" Info ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
         frame.render_widget(info_widget, chunks[2]);
 
         // Help bar

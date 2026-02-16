@@ -7,9 +7,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::daemon::ipc::{
-    deserialize_request, serialize_response, DaemonRequest, DaemonResponse,
-};
+use crate::daemon::ipc::{deserialize_request, serialize_response, DaemonRequest, DaemonResponse};
 
 /// Command channel for the server
 pub type CommandSender = mpsc::Sender<(DaemonRequest, mpsc::Sender<DaemonResponse>)>;
@@ -135,12 +133,9 @@ async fn handle_connection(mut stream: UnixStream, cmd_tx: CommandSender) -> Res
         let (resp_tx, mut resp_rx) = mpsc::channel(1);
         cmd_tx.send((request, resp_tx)).await?;
 
-        let response = resp_rx
-            .recv()
-            .await
-            .unwrap_or(DaemonResponse::Error {
-                message: "Handler closed".to_string(),
-            });
+        let response = resp_rx.recv().await.unwrap_or(DaemonResponse::Error {
+            message: "Handler closed".to_string(),
+        });
 
         // Send response
         let bytes = serialize_response(&response);

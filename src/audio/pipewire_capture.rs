@@ -531,10 +531,9 @@ fn parse_wpctl_status_default_node_id(output: &str, kind: TargetKind) -> Option<
 
 fn parse_wpctl_status_node_line(line: &str) -> Option<(String, String, bool)> {
     let is_default = line.contains('*');
-    let mut chars = line.char_indices().peekable();
     let mut start = None;
 
-    while let Some((idx, ch)) = chars.next() {
+    for (idx, ch) in line.char_indices() {
         if ch.is_ascii_digit() {
             start = Some(idx);
             break;

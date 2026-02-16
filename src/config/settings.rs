@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use crate::audio::AudioBackend;
 
 /// Main application settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Settings {
     /// General settings
     #[serde(default)]
@@ -254,18 +254,6 @@ impl Default for TuiSettings {
     }
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            general: GeneralSettings::default(),
-            audio: AudioSettings::default(),
-            whisper: WhisperSettings::default(),
-            llm: LlmSettings::default(),
-            tui: TuiSettings::default(),
-        }
-    }
-}
-
 impl Settings {
     /// Load settings from the configuration file
     pub fn load() -> Result<Self> {
@@ -358,7 +346,9 @@ impl Settings {
 
     /// Get the path to a whisper model file
     pub fn model_path(&self) -> PathBuf {
-        self.whisper.models_dir.join(format!("ggml-{}.bin", self.whisper.model))
+        self.whisper
+            .models_dir
+            .join(format!("ggml-{}.bin", self.whisper.model))
     }
 }
 

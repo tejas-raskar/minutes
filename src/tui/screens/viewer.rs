@@ -16,6 +16,12 @@ pub struct ViewerScreen {
     content_height: usize,
 }
 
+impl Default for ViewerScreen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ViewerScreen {
     pub fn new() -> Self {
         Self {
@@ -50,9 +56,10 @@ impl ViewerScreen {
                 .unwrap_or_else(|| "??:??".to_string());
 
             vec![
-                Line::from(vec![
-                    Span::styled(&recording.title, Style::default().fg(Color::White).bold()),
-                ]),
+                Line::from(vec![Span::styled(
+                    &recording.title,
+                    Style::default().fg(Color::White).bold(),
+                )]),
                 Line::from(vec![
                     Span::styled(
                         recording.created_at.format("%Y-%m-%d %H:%M").to_string(),
@@ -140,7 +147,10 @@ impl ViewerScreen {
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" ↑/↓ ", Style::default().fg(Color::Black).bg(Color::Cyan)),
             Span::raw(" Scroll  "),
-            Span::styled(" PgUp/PgDn ", Style::default().fg(Color::Black).bg(Color::Cyan)),
+            Span::styled(
+                " PgUp/PgDn ",
+                Style::default().fg(Color::Black).bg(Color::Cyan),
+            ),
             Span::raw(" Page  "),
             Span::styled(" g/G ", Style::default().fg(Color::Black).bg(Color::Cyan)),
             Span::raw(" Top/Bottom  "),

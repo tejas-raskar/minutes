@@ -174,10 +174,7 @@ impl App {
             Ok(mut client) => {
                 let request = match &self.daemon_status {
                     RecordingStatus::Idle => DaemonRequest::StartRecording {
-                        title: format!(
-                            "Meeting {}",
-                            chrono::Local::now().format("%Y-%m-%d %H:%M")
-                        ),
+                        title: format!("Meeting {}", chrono::Local::now().format("%Y-%m-%d %H:%M")),
                     },
                     RecordingStatus::Recording { .. } => DaemonRequest::StopRecording,
                     _ => return Ok(()),
@@ -244,10 +241,10 @@ impl App {
     /// Update daemon status
     async fn update_daemon_status(&mut self) {
         if let Ok(mut client) = DaemonClient::connect(&self.settings).await {
-            if let Ok(response) = client.send(DaemonRequest::GetStatus).await {
-                if let crate::daemon::ipc::DaemonResponse::Status(status) = response {
-                    self.daemon_status = status;
-                }
+            if let Ok(crate::daemon::ipc::DaemonResponse::Status(status)) =
+                client.send(DaemonRequest::GetStatus).await
+            {
+                self.daemon_status = status;
             }
         }
     }

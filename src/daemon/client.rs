@@ -5,9 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use crate::config::Settings;
-use crate::daemon::ipc::{
-    deserialize_response, serialize_request, DaemonRequest, DaemonResponse,
-};
+use crate::daemon::ipc::{deserialize_response, serialize_request, DaemonRequest, DaemonResponse};
 
 /// Client for communicating with the daemon
 pub struct DaemonClient {

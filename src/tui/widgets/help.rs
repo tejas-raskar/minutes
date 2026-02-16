@@ -131,15 +131,13 @@ impl HelpPopup {
             Style::default().fg(Color::DarkGray),
         )));
 
-        let help = Paragraph::new(full_text)
-            .wrap(Wrap { trim: true })
-            .block(
-                Block::default()
-                    .title(" Help ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan))
-                    .style(Style::default().bg(Color::Black)),
-            );
+        let help = Paragraph::new(full_text).wrap(Wrap { trim: true }).block(
+            Block::default()
+                .title(" Help ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .style(Style::default().bg(Color::Black)),
+        );
 
         frame.render_widget(help, popup_area);
     }

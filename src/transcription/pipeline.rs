@@ -78,10 +78,7 @@ impl TranscriptionPipeline {
         // Merge adjacent segments if they're continuous
         let merged_segments = merge_segments(all_segments);
 
-        tracing::info!(
-            "Transcription complete: {} segments",
-            merged_segments.len()
-        );
+        tracing::info!("Transcription complete: {} segments", merged_segments.len());
 
         Ok(merged_segments)
     }

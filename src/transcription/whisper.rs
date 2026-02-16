@@ -67,13 +67,18 @@ impl WhisperTranscriber {
         }
 
         // Run inference
-        let mut state = self.ctx.create_state().context("Failed to create Whisper state")?;
+        let mut state = self
+            .ctx
+            .create_state()
+            .context("Failed to create Whisper state")?;
         state
             .full(params, samples)
             .context("Whisper inference failed")?;
 
         // Extract segments
-        let num_segments = state.full_n_segments().context("Failed to get segment count")?;
+        let num_segments = state
+            .full_n_segments()
+            .context("Failed to get segment count")?;
         let mut segments = Vec::new();
 
         for i in 0..num_segments {
@@ -127,23 +132,20 @@ pub fn load_audio(path: &Path) -> Result<Vec<f32>> {
 
     // Read samples based on format
     let samples: Vec<f32> = match (spec.sample_format, spec.bits_per_sample) {
-        (hound::SampleFormat::Int, 16) => {
-            reader
-                .into_samples::<i16>()
-                .filter_map(|s| s.ok())
-                .map(|s| s as f32 / 32768.0)
-                .collect()
-        }
-        (hound::SampleFormat::Int, 32) => {
-            reader
-                .into_samples::<i32>()
-                .filter_map(|s| s.ok())
-                .map(|s| s as f32 / 2147483648.0)
-                .collect()
-        }
-        (hound::SampleFormat::Float, 32) => {
-            reader.into_samples::<f32>().filter_map(|s| s.ok()).collect()
-        }
+        (hound::SampleFormat::Int, 16) => reader
+            .into_samples::<i16>()
+            .filter_map(|s| s.ok())
+            .map(|s| s as f32 / 32768.0)
+            .collect(),
+        (hound::SampleFormat::Int, 32) => reader
+            .into_samples::<i32>()
+            .filter_map(|s| s.ok())
+            .map(|s| s as f32 / 2147483648.0)
+            .collect(),
+        (hound::SampleFormat::Float, 32) => reader
+            .into_samples::<f32>()
+            .filter_map(|s| s.ok())
+            .collect(),
         _ => anyhow::bail!(
             "Unsupported audio format: {:?} {}bit",
             spec.sample_format,

@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// State of a recording
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,15 +30,19 @@ impl RecordingState {
             Self::Failed => "failed",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for RecordingState {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "recording" => Some(Self::Recording),
-            "pending" => Some(Self::Pending),
-            "transcribing" => Some(Self::Transcribing),
-            "completed" => Some(Self::Completed),
-            "failed" => Some(Self::Failed),
-            _ => None,
+            "recording" => Ok(Self::Recording),
+            "pending" => Ok(Self::Pending),
+            "transcribing" => Ok(Self::Transcribing),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            _ => Err(()),
         }
     }
 }
@@ -118,12 +123,7 @@ pub struct TranscriptSegment {
 
 impl TranscriptSegment {
     /// Create a new transcript segment
-    pub fn new(
-        recording_id: String,
-        start_time: f64,
-        end_time: f64,
-        text: String,
-    ) -> Self {
+    pub fn new(recording_id: String, start_time: f64, end_time: f64, text: String) -> Self {
         Self {
             id: 0, // Will be set by database
             recording_id,

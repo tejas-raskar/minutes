@@ -185,9 +185,7 @@ fn find_suitable_config(
             && config.min_sample_rate().0 <= target_sample_rate
             && config.max_sample_rate().0 >= target_sample_rate
         {
-            return Ok(config
-                .clone()
-                .with_sample_rate(cpal::SampleRate(target_sample_rate)));
+            return Ok((*config).with_sample_rate(cpal::SampleRate(target_sample_rate)));
         }
     }
 
@@ -196,9 +194,7 @@ fn find_suitable_config(
         if config.min_sample_rate().0 <= target_sample_rate
             && config.max_sample_rate().0 >= target_sample_rate
         {
-            return Ok(config
-                .clone()
-                .with_sample_rate(cpal::SampleRate(target_sample_rate)));
+            return Ok((*config).with_sample_rate(cpal::SampleRate(target_sample_rate)));
         }
     }
 

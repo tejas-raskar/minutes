@@ -240,7 +240,9 @@ impl Database {
         )?;
 
         let recordings = stmt
-            .query_map(params![pattern, limit], |row| Ok(Self::row_to_recording(row)))?
+            .query_map(params![pattern, limit], |row| {
+                Ok(Self::row_to_recording(row))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
@@ -250,7 +252,8 @@ impl Database {
 
     /// Delete a recording and its segments
     pub fn delete_recording(&self, id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM recordings WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM recordings WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -407,7 +410,7 @@ impl Database {
             title: row.get(offset + 1)?,
             audio_path: row.get(offset + 2)?,
             duration_secs: row.get(offset + 3)?,
-            state: RecordingState::from_str(&state_str).unwrap_or(RecordingState::Pending),
+            state: state_str.parse().unwrap_or(RecordingState::Pending),
             created_at: Utc.timestamp_opt(created_timestamp, 0).unwrap(),
             updated_at: Utc.timestamp_opt(updated_timestamp, 0).unwrap(),
             notes: row.get(offset + 7)?,
@@ -417,15 +420,15 @@ impl Database {
 
     /// Get database statistics
     pub fn get_stats(&self) -> Result<DatabaseStats> {
-        let total_recordings: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM recordings", [], |row| row.get(0))?;
+        let total_recordings: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM recordings", [], |row| row.get(0))?;
 
-        let total_segments: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM transcript_segments", [], |row| {
-                row.get(0)
-            })?;
+        let total_segments: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM transcript_segments", [], |row| {
+                    row.get(0)
+                })?;
 
         let total_duration: Option<i64> = self
             .conn

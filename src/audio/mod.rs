@@ -87,7 +87,7 @@ pub fn create_capture(settings: &Settings) -> Result<Box<dyn AudioCapture>> {
             #[cfg(all(target_os = "linux", feature = "pipewire"))]
             {
                 tracing::info!("Using PipeWire audio backend (forced)");
-                return Ok(Box::new(PipeWireCapture::new(settings)?));
+                Ok(Box::new(PipeWireCapture::new(settings)?))
             }
             #[cfg(not(all(target_os = "linux", feature = "pipewire")))]
             {

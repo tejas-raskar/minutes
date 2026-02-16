@@ -25,8 +25,12 @@ fn database_supports_core_recording_workflow() -> Result<()> {
         5.0,
         "Hello team this is a test meeting".to_string(),
     );
-    let segment2 =
-        TranscriptSegment::new(recording.id.clone(), 5.0, 8.0, "Agenda and follow up".to_string());
+    let segment2 = TranscriptSegment::new(
+        recording.id.clone(),
+        5.0,
+        8.0,
+        "Agenda and follow up".to_string(),
+    );
     db.insert_segments(&[segment1, segment2])?;
 
     let segments = db.get_transcript_segments(&recording.id)?;
@@ -55,8 +59,12 @@ fn deleting_recording_removes_transcript_segments() -> Result<()> {
     let recording = Recording::new("Delete me".to_string());
     db.insert_recording(&recording)?;
 
-    let segment =
-        TranscriptSegment::new(recording.id.clone(), 0.0, 2.0, "Temporary content".to_string());
+    let segment = TranscriptSegment::new(
+        recording.id.clone(),
+        0.0,
+        2.0,
+        "Temporary content".to_string(),
+    );
     db.insert_segment(&segment)?;
 
     db.delete_recording(&recording.id)?;
