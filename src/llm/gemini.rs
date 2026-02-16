@@ -81,9 +81,11 @@ impl LlmProvider for GeminiClient {
             .await
             .context("Gemini request failed")?;
 
-        let response = response
-            .error_for_status()
-            .context("Gemini returned an error status")?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("{}", format_gemini_http_error(status, &body));
+        }
 
         let payload: GeminiGenerateContentResponse = response
             .json()
@@ -139,4 +141,83 @@ struct GeminiContentResponse {
 #[derive(Debug, Deserialize)]
 struct GeminiPartResponse {
     text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiErrorResponse {
+    error: GeminiErrorPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiErrorPayload {
+    code: Option<u16>,
+    message: Option<String>,
+    status: Option<String>,
+}
+
+fn format_gemini_http_error(status: reqwest::StatusCode, body: &str) -> String {
+    let status_text = status.canonical_reason().unwrap_or("Unknown Status");
+    let mut message = format!(
+        "Gemini API request failed ({} {})",
+        status.as_u16(),
+        status_text
+    );
+
+    if let Some(detail) =
+        gemini_error_detail(body).or_else(|| compact_error_body(body).map(|s| s.to_string()))
+    {
+        message.push_str(": ");
+        message.push_str(&detail);
+    }
+
+    if let Some(hint) = gemini_status_hint(status) {
+        message.push_str(". ");
+        message.push_str(hint);
+    }
+
+    message
+}
+
+fn gemini_error_detail(body: &str) -> Option<String> {
+    let payload: GeminiErrorResponse = serde_json::from_str(body).ok()?;
+    let message = payload.error.message?.trim().to_string();
+    if message.is_empty() {
+        return None;
+    }
+
+    let status = payload.error.status.unwrap_or_default();
+    let code = payload.error.code;
+
+    let detail = match (status.is_empty(), code) {
+        (false, Some(code)) => format!("{} (status: {}, code: {})", message, status, code),
+        (false, None) => format!("{} (status: {})", message, status),
+        (true, Some(code)) => format!("{} (code: {})", message, code),
+        (true, None) => message,
+    };
+
+    Some(detail)
+}
+
+fn compact_error_body(body: &str) -> Option<String> {
+    let collapsed = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+
+    if collapsed.chars().count() <= 240 {
+        return Some(collapsed);
+    }
+
+    let truncated: String = collapsed.chars().take(240).collect();
+    Some(format!("{}...", truncated))
+}
+
+fn gemini_status_hint(status: reqwest::StatusCode) -> Option<&'static str> {
+    match status.as_u16() {
+        401 | 403 => Some("Check MINUTES_GEMINI_API_KEY and Gemini API access permissions"),
+        404 => Some("Check llm.model and llm.endpoint in your config"),
+        429 => Some("Gemini quota or rate limit exceeded; retry later"),
+        500..=599 => Some("Gemini service appears unavailable; retry shortly"),
+        _ => None,
+    }
 }
