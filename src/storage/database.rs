@@ -13,6 +13,8 @@ pub struct Database {
     conn: Connection,
 }
 
+const CURRENT_SCHEMA_VERSION: i64 = 1;
+
 impl Database {
     /// Open or create the database
     pub fn open(settings: &Settings) -> Result<Self> {
@@ -51,6 +53,37 @@ impl Database {
         // Enable foreign keys
         self.conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
+        let current_version = self.schema_version()?;
+        if current_version > CURRENT_SCHEMA_VERSION {
+            anyhow::bail!(
+                "Database schema version {} is newer than supported version {}",
+                current_version,
+                CURRENT_SCHEMA_VERSION
+            );
+        }
+
+        if current_version < 1 {
+            self.migrate_to_v1()?;
+            self.set_schema_version(1)?;
+        }
+
+        Ok(())
+    }
+
+    /// Current schema version tracked in PRAGMA user_version.
+    pub fn schema_version(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("PRAGMA user_version;", [], |row| row.get(0))?)
+    }
+
+    fn set_schema_version(&self, version: i64) -> Result<()> {
+        self.conn
+            .execute(&format!("PRAGMA user_version = {}", version), [])?;
+        Ok(())
+    }
+
+    fn migrate_to_v1(&self) -> Result<()> {
         // Create recordings table
         self.conn.execute_batch(
             r#"
@@ -459,6 +492,8 @@ pub struct DatabaseStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
+    use tempfile::tempdir;
 
     #[test]
     fn test_create_database() {
@@ -496,5 +531,63 @@ mod tests {
         let results = db.search_transcripts("hello", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].1.text.contains("Hello"));
+    }
+
+    #[test]
+    fn test_new_database_sets_schema_version() {
+        let db = Database::open_memory().unwrap();
+        assert_eq!(db.schema_version().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_opening_legacy_database_runs_migration() {
+        let tmp = tempdir().unwrap();
+        let db_path = tmp.path().join("legacy.db");
+
+        // Simulate a legacy schema without PRAGMA user_version migration tracking.
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE recordings (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                audio_path TEXT,
+                duration_secs INTEGER,
+                state TEXT NOT NULL DEFAULT 'recording',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                notes TEXT,
+                tags TEXT DEFAULT '[]'
+            );
+
+            CREATE TABLE transcript_segments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id TEXT NOT NULL,
+                start_time REAL NOT NULL,
+                end_time REAL NOT NULL,
+                text TEXT NOT NULL,
+                speaker TEXT,
+                confidence REAL
+            );
+            "#,
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Database::open_path(&db_path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), 1);
+
+        let recording = Recording::new("Legacy migration".to_string());
+        db.insert_recording(&recording).unwrap();
+        let segment = TranscriptSegment::new(
+            recording.id.clone(),
+            0.0,
+            1.0,
+            "migration searchable text".to_string(),
+        );
+        db.insert_segment(&segment).unwrap();
+
+        let results = db.search_transcripts("searchable", 10).unwrap();
+        assert_eq!(results.len(), 1);
     }
 }
