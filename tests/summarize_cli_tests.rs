@@ -33,12 +33,7 @@ fn seed_recording(data_dir: &Path) -> String {
     recording.id
 }
 
-fn setup_summary_env(
-    env: &TestEnv,
-    data_dir: &Path,
-    endpoint: &str,
-    api_key: &str,
-) -> String {
+fn setup_summary_env(env: &TestEnv, data_dir: &Path, endpoint: &str, api_key: &str) -> String {
     let recording_id = seed_recording(data_dir);
     let config = format!(
         r#"[general]
