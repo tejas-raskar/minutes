@@ -2,7 +2,7 @@
 
 This file records notable project changes by released version.
 
-## [0.1.0] - 2026-02-16
+## [0.1.0] - 2026-02-19
 
 This is the initial public, CLI-first release.
 
@@ -30,6 +30,10 @@ This release also improves default model selection and audio target resolution.
 - PipeWire fallback now matches configured defaults when `*` markers are not
   present.
 - Default Gemini model is now `gemini-2.5-flash`.
+- Rust toolchain is now pinned in CI and release workflows for repeatable
+  builds.
+- Dependency resolution is now locked in CI checks and release builds.
+- `Cargo.lock` is now tracked to keep dependency versions reproducible.
 
 ### Fixed
 
@@ -38,6 +42,8 @@ Several reliability issues were corrected in this release.
 - Daemon start now fails cleanly when background boot fails.
 - System track is preserved when microphone capture is unavailable.
 - System-audio capture reliability is improved when the microphone is muted.
+- Linux CI now installs ALSA development headers to support
+  `--all-features` checks.
 
 ## [Unreleased]
 
